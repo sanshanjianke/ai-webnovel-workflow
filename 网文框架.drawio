@@ -1,0 +1,96 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.6.1 Chrome/142.0.7444.265 Electron/39.8.0 Safari/537.36" version="29.6.1" pages="2">
+  <diagram name="第 1 页" id="JnlJAvmBAgyIL8q5o59n">
+    <mxGraphModel dx="1042" dy="624" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-1" parent="1" style="ellipse;whiteSpace=wrap;html=1;" value="L2 架构层" vertex="1">
+          <mxGeometry height="80" width="120" x="130" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-3" parent="1" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;" value="&lt;div&gt;Agent&lt;/div&gt;数据集处理流程" vertex="1">
+          <mxGeometry height="60" width="120" x="130" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-4" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;" value="向量&lt;div&gt;数据库&lt;/div&gt;" vertex="1">
+          <mxGeometry height="80" width="60" x="335" y="340" as="geometry" />
+        </mxCell>
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-7" parent="1" style="ellipse;whiteSpace=wrap;html=1;" value="知识库检索专家" vertex="1">
+          <mxGeometry height="80" width="120" x="450" y="400" as="geometry" />
+        </mxCell>
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-8" parent="1" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;" value="RAG+Agent整理" vertex="1">
+          <mxGeometry height="60" width="120" x="620" y="410" as="geometry" />
+        </mxCell>
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-9" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;" value="md文本库" vertex="1">
+          <mxGeometry height="80" width="60" x="335" y="450" as="geometry" />
+        </mxCell>
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-20" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="交互" vertex="1">
+          <mxGeometry height="30" width="60" x="480" y="245" as="geometry" />
+        </mxCell>
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-21" edge="1" parent="1" source="v_WqhEJTto_6-u_6pPi3-7" style="endArrow=classic;startArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="v_WqhEJTto_6-u_6pPi3-8" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="300" as="sourcePoint" />
+            <mxPoint x="440" y="250" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-22" edge="1" parent="1" source="v_WqhEJTto_6-u_6pPi3-1" style="endArrow=classic;startArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="v_WqhEJTto_6-u_6pPi3-20" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="300" as="sourcePoint" />
+            <mxPoint x="440" y="250" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-23" edge="1" parent="1" source="v_WqhEJTto_6-u_6pPi3-7" style="endArrow=classic;startArrow=classic;html=1;rounded=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="v_WqhEJTto_6-u_6pPi3-20" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="300" as="sourcePoint" />
+            <mxPoint x="440" y="250" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-26" edge="1" parent="1" source="v_WqhEJTto_6-u_6pPi3-1" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="v_WqhEJTto_6-u_6pPi3-3" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="190" y="360" as="sourcePoint" />
+            <mxPoint x="440" y="250" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-27" edge="1" parent="1" source="v_WqhEJTto_6-u_6pPi3-3" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" target="v_WqhEJTto_6-u_6pPi3-4" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="300" as="sourcePoint" />
+            <mxPoint x="440" y="250" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-28" edge="1" parent="1" source="v_WqhEJTto_6-u_6pPi3-3" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" target="v_WqhEJTto_6-u_6pPi3-9" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="300" as="sourcePoint" />
+            <mxPoint x="440" y="250" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-29" edge="1" parent="1" source="v_WqhEJTto_6-u_6pPi3-4" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;" target="v_WqhEJTto_6-u_6pPi3-7" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="300" as="sourcePoint" />
+            <mxPoint x="440" y="250" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-30" edge="1" parent="1" source="v_WqhEJTto_6-u_6pPi3-9" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;" target="v_WqhEJTto_6-u_6pPi3-7" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="390" y="300" as="sourcePoint" />
+            <mxPoint x="440" y="250" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-31" parent="1" style="text;html=1;whiteSpace=wrap;overflow=hidden;rounded=0;" value="&lt;h1 style=&quot;margin-top: 0px;&quot;&gt;向量数据库&lt;/h1&gt;&lt;p&gt;以序列、人物的片段为主。片段应该包含指向md文本库的标签。&lt;/p&gt;" vertex="1">
+          <mxGeometry height="120" width="180" x="250" y="585" as="geometry" />
+        </mxCell>
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-32" parent="1" style="text;html=1;whiteSpace=wrap;overflow=hidden;rounded=0;" value="&lt;h1 style=&quot;margin-top: 0px;&quot;&gt;md文本库&lt;/h1&gt;&lt;p&gt;以2000-10000字分割成的小章节。例如片段1，片段2，片段3。其间相互包含很大一部分而不是绝对分割（独立的只占20%左右）。这样可以保证向量数据库的标签不是指向片段中文本的顶部或者底部。&lt;/p&gt;" vertex="1">
+          <mxGeometry height="165" width="180" x="450" y="585" as="geometry" />
+        </mxCell>
+        <mxCell id="v_WqhEJTto_6-u_6pPi3-33" parent="1" style="text;html=1;whiteSpace=wrap;overflow=hidden;rounded=0;" value="&lt;h1 style=&quot;margin-top: 0px;&quot;&gt;知识库检索专家&lt;/h1&gt;&lt;p&gt;读取L2架构层产生的文本。&lt;/p&gt;&lt;p&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;通过RAG方式，确定片段位置和所需内容， 然后阅读对应.md文本库获取细节。&lt;/span&gt;&lt;/p&gt;&lt;p&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;然后agent加工细节，确定需求返回L2 架构层&lt;/span&gt;&lt;/p&gt;" vertex="1">
+          <mxGeometry height="160" width="180" x="590" y="220" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="FSa9hP9ZR1nphYr-AoWY" name="第 2 页">
+    <mxGraphModel grid="1" page="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
