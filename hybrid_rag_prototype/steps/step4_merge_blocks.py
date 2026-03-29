@@ -47,19 +47,23 @@ def merge_and_split(drafts: list, block_size_kb: int = 50):
     # 合并所有草稿
     all_text = "\n\n".join([d['text'] for d in drafts])
     total_chars = len(all_text)
-    block_size = block_size_kb * 1024
     
-    print(f"  总文本: {total_chars:,}字 ({total_chars//1024}KB)")
-    print(f"  块大小: {block_size_kb}KB")
+    # 注意：中文字符UTF-8编码约3字节
+    # 50KB ≈ 50000字节 ≈ 16000中文字符
+    block_size_chars = block_size_kb * 1024 // 3
+    
+    print(f"  总文本: {total_chars:,}字 ({total_chars*3//1024}KB)")
+    print(f"  块大小: {block_size_kb}KB (约{block_size_chars}字符)")
     
     # 切分
     blocks = []
-    for i in range(0, total_chars, block_size):
-        chunk = all_text[i:i + block_size]
+    for i in range(0, total_chars, block_size_chars):
+        chunk = all_text[i:i + block_size_chars]
         blocks.append({
             "block_id": len(blocks) + 1,
             "text": chunk,
-            "char_count": len(chunk)
+            "char_count": len(chunk),
+            "byte_size": len(chunk.encode('utf-8'))
         })
     
     return blocks
@@ -110,7 +114,7 @@ def main():
     blocks = merge_and_split(drafts, args.size)
     
     for block in blocks:
-        print(f"  块{block['block_id']}: {block['char_count']//1024}KB")
+        print(f"  块{block['block_id']}: {block['byte_size']//1024}KB ({block['char_count']}字)")
     
     # 保存
     output_dir = Path(args.output)
