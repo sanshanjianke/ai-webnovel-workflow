@@ -17,13 +17,14 @@ except ImportError:
     OpenAIEmbeddings = None
 
 
-def create_llm(model: str = None, temperature: float = 0.7, **kwargs):
+def create_llm(model: str = None, temperature: float = 0.7, request_timeout: int = 120, **kwargs):
     """
     创建LLM对象
     
     Args:
         model: 模型名称（默认使用config中的LLM_MODEL）
         temperature: 温度参数
+        request_timeout: 请求超时时间（秒），默认120秒
         **kwargs: 其他参数
         
     Returns:
@@ -44,6 +45,7 @@ def create_llm(model: str = None, temperature: float = 0.7, **kwargs):
         temperature=temperature,
         openai_api_key=OPENAI_API_KEY,
         openai_api_base=OPENAI_BASE_URL,
+        request_timeout=request_timeout,
         **kwargs
     )
     

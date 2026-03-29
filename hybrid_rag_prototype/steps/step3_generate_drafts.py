@@ -1,164 +1,186 @@
 """
-步骤3：LLM生成草稿
+步骤3：LLM生成草稿（并行版本）
 
-功能：调用LLM将序列缩减为草稿
-
-输入：output/02_sequences/
-输出：output/03_drafts/
+功能：并行调用LLM将序列缩减为草稿
 
 用法：
-    python steps/step3_generate_drafts.py --input output/02_sequences --output output/03_drafts
+    python steps/step3_generate_drafts.py --input output/02_sequences --output output/03_drafts --workers 10
 
-注意：
-    - 每章只发送前3000字给LLM（防止超时）
-    - 修改 PROMPT_TEMPLATE 可调整输出质量
-    - 支持断点续传（已存在的草稿会跳过）
+特性：
+    - 并行处理多个序列
+    - 超时自动重试
+    - 支持断点续传
 """
 
 import json
 import time
 import argparse
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
+import re
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils import create_llm
 
 
 # ============================================================================
-# 【关键】Prompt模板 - 修改这里调整输出质量
+# 配置（可通过命令行参数覆盖）
 # ============================================================================
-PROMPT_TEMPLATE = """你是一个专业的网文编辑。请将以下章节内容缩减为草稿版本。
+DEFAULT_TIMEOUT = 180      # 默认超时（秒）- GLM5很慢
+DEFAULT_WORKERS = 5        # 默认并发数
+DEFAULT_CHARS = 2000       # 默认每章发送字数
+DEFAULT_DELAY = 0.5        # 请求间隔（秒）
+MAX_RETRIES = 2            # 最大重试次数
 
-要求：
-1. 输出总字数约5000字（7章合计），每章约700字
-2. 保留：人物性格特征、话语模式、关键对话原文、事件细节、决策过程、冲突结果、设定、伏笔
-3. 删除：过于冗长的环境描写、无关的过渡段落
-4. 保持连贯：缩减后剧情逻辑完整，人物形象鲜明
+PROMPT_TEMPLATE = """请用约3000字总结以下章节内容，保留关键剧情、人物性格、对话和设定：
 
-章节内容：
-{content}
+{content}"""
 
-直接输出缩减后的文本，每章用【第X章】分隔。确保总字数约5000字。"""
+
+def clean_response(text: str) -> str:
+    """清理LLM响应，去除think等标签"""
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    text = re.sub(r'<[^>]+>', '', text)
+    return text.strip()
 
 
 def load_sequences(input_dir: Path):
     """加载序列"""
-    index_file = input_dir / "index.json"
-    if not index_file.exists():
-        print(f"  ✗ 找不到索引文件: {index_file}")
-        return []
-    
-    index = json.loads(index_file.read_text(encoding='utf-8'))
-    
     sequences = []
-    for item in index:
-        seq_file = input_dir / f"sequence_{item['seq_id']:02d}.txt"
-        if seq_file.exists():
-            text = seq_file.read_text(encoding='utf-8')
-            sequences.append({
-                "seq_id": item['seq_id'],
-                "start": item['start'],
-                "end": item['end'],
-                "text": text
-            })
+    index_file = input_dir / "index.json"
+    
+    if index_file.exists():
+        index = json.loads(index_file.read_text(encoding='utf-8'))
+        for item in index:
+            seq_file = input_dir / f"sequence_{item['seq_id']:02d}.txt"
+            if seq_file.exists():
+                sequences.append({
+                    "seq_id": item['seq_id'],
+                    "text": seq_file.read_text(encoding='utf-8')
+                })
+    else:
+        for f in sorted(input_dir.glob("sequence_*.txt")):
+            seq_id = int(f.stem.split("_")[1])
+            sequences.append({"seq_id": seq_id, "text": f.read_text()})
     
     return sorted(sequences, key=lambda x: x['seq_id'])
 
 
-def load_existing_drafts(output_dir: Path):
-    """加载已存在的草稿（断点续传）"""
-    existing = {}
-    if output_dir.exists():
-        for f in output_dir.glob("draft_*.txt"):
-            seq_id = int(f.stem.split("_")[1])
-            content = f.read_text(encoding='utf-8')
-            if not content.startswith("[失败"):
-                existing[seq_id] = content
-    return existing
-
-
-def generate_draft(llm, sequence: dict, chars_per_chapter: int = 3000):
-    """
-    生成单个草稿
-    
-    Args:
-        llm: LLM实例
-        sequence: 序列数据
-        chars_per_chapter: 每章发送的字数限制
-    
-    Returns:
-        草稿文本
-    """
-    # 构建内容（每章限制字数）
-    # 【修改点】调整 chars_per_chapter 可发送更多/更少内容
-    content = sequence['text'][:chars_per_chapter * 7]  # 7章，每章限制字数
-    
+def process_one(seq_id: int, text: str, output_dir: Path, chars: int, timeout: int, retries: int = MAX_RETRIES):
+    """处理单个序列（带重试）"""
+    content = text[:chars * 7]
     prompt = PROMPT_TEMPLATE.format(content=content)
     
-    response = llm.invoke(prompt)
-    return response.content
-
-
-def save_draft(seq_id: int, draft_text: str, output_dir: Path):
-    """保存草稿"""
-    output_dir.mkdir(parents=True, exist_ok=True)
-    filepath = output_dir / f"draft_{seq_id:02d}.txt"
-    filepath.write_text(draft_text, encoding='utf-8')
+    for attempt in range(retries + 1):
+        try:
+            llm = create_llm(request_timeout=timeout)
+            resp = llm.invoke(prompt)
+            draft = clean_response(resp.content)
+            
+            if len(draft) < 100:
+                raise Exception(f"输出太短: {len(draft)}字")
+            
+            filepath = output_dir / f"draft_{seq_id:02d}.txt"
+            filepath.write_text(draft, encoding='utf-8')
+            
+            return (seq_id, len(draft), True, None)
+            
+        except Exception as e:
+            if attempt < retries:
+                time.sleep(2)
+            else:
+                return (seq_id, 0, False, str(e))
+    
+    return (seq_id, 0, False, "未知错误")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='步骤3：LLM生成草稿')
-    parser.add_argument('--input', '-i', default='output/02_sequences', help='输入目录')
-    parser.add_argument('--output', '-o', default='output/03_drafts', help='输出目录')
-    parser.add_argument('--chars', '-c', type=int, default=3000, help='每章发送字数')
+    parser = argparse.ArgumentParser(description='步骤3：LLM生成草稿（并行版本）')
+    parser.add_argument('--input', '-i', default='output/02_sequences')
+    parser.add_argument('--output', '-o', default='output/03_drafts')
+    parser.add_argument('--workers', '-w', type=int, default=DEFAULT_WORKERS, help=f'并发数（默认{DEFAULT_WORKERS}）')
+    parser.add_argument('--chars', '-c', type=int, default=DEFAULT_CHARS, help=f'每章字数（默认{DEFAULT_CHARS}）')
+    parser.add_argument('--timeout', '-t', type=int, default=DEFAULT_TIMEOUT, help=f'超时秒数（默认{DEFAULT_TIMEOUT}）')
+    parser.add_argument('--delay', '-d', type=float, default=DEFAULT_DELAY, help=f'请求间隔（默认{DEFAULT_DELAY}）')
+    parser.add_argument('--retries', '-r', type=int, default=MAX_RETRIES, help=f'重试次数（默认{MAX_RETRIES}）')
     args = parser.parse_args()
     
-    print("\n" + "="*50)
-    print("步骤3：LLM生成草稿")
-    print("="*50)
+    print("\n" + "="*60)
+    print("步骤3：LLM生成草稿（并行版本）")
+    print("="*60)
+    print(f"并发: {args.workers}, 超时: {args.timeout}秒, 重试: {args.retries}次")
     
-    # 初始化LLM
-    print("\n初始化LLM...")
-    llm = create_llm(temperature=0.3)
-    if not llm:
-        print("  ✗ LLM初始化失败")
-        return
-    print("  ✓ LLM初始化成功")
-    
-    # 加载序列
-    print(f"\n加载序列: {args.input}")
-    sequences = load_sequences(Path(args.input))
+    # 加载
+    input_dir = Path(args.input)
+    sequences = load_sequences(input_dir)
     if not sequences:
+        print("✗ 没有找到序列")
         return
-    print(f"  ✓ 加载 {len(sequences)} 个序列")
     
-    # 加载已存在的草稿
+    print(f"加载 {len(sequences)} 个序列")
+    
+    # 输出目录
     output_dir = Path(args.output)
-    existing = load_existing_drafts(output_dir)
-    if existing:
-        print(f"  发现已有草稿: {len(existing)} 个（将跳过）")
+    output_dir.mkdir(parents=True, exist_ok=True)
     
-    # 处理每个序列
-    print(f"\n生成草稿...")
-    for i, seq in enumerate(sequences):
-        # 跳过已存在
-        if seq['seq_id'] in existing:
-            print(f"  [{i+1}/{len(sequences)}] 序列{seq['seq_id']}: 已存在，跳过")
-            continue
-        
-        print(f"  [{i+1}/{len(sequences)}] 序列{seq['seq_id']}: 第{seq['start']}-{seq['end']}章...", end=" ")
-        
-        try:
-            draft_text = generate_draft(llm, seq, args.chars)
-            save_draft(seq['seq_id'], draft_text, output_dir)
-            print(f"✓ {len(draft_text)}字")
-            time.sleep(0.5)  # 防止限流
-        except Exception as e:
-            print(f"✗ 失败: {e}")
-            save_draft(seq['seq_id'], f"[失败: {e}]", output_dir)
+    # 检查已完成
+    existing = set()
+    for f in output_dir.glob("draft_*.txt"):
+        if f.stat().st_size > 100:
+            seq_id = int(f.stem.split("_")[1])
+            existing.add(seq_id)
     
-    print(f"\n✓ 完成，保存到: {output_dir}/")
+    pending = [s for s in sequences if s['seq_id'] not in existing]
+    print(f"已完成: {len(existing)}, 待处理: {len(pending)}")
+    
+    if not pending:
+        print("✓ 全部完成")
+        return
+    
+    # 并行处理
+    print(f"\n开始处理...")
+    start_time = time.time()
+    success = len(existing)
+    failed = []
+    
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+        futures = {}
+        
+        for seq in pending:
+            future = executor.submit(
+                process_one, 
+                seq['seq_id'], seq['text'], output_dir,
+                args.chars, args.timeout, args.retries
+            )
+            futures[future] = seq
+            time.sleep(args.delay)
+        
+        for future in as_completed(futures):
+            seq = futures[future]
+            try:
+                seq_id, length, ok, err = future.result()
+                if ok:
+                    success += 1
+                    print(f"  [{success}/{len(sequences)}] ✓ 序列{seq_id}: {length}字")
+                else:
+                    failed.append((seq_id, err))
+                    print(f"  ✗ 序列{seq_id}: {err}")
+            except Exception as e:
+                failed.append((seq['seq_id'], str(e)))
+                print(f"  ✗ 序列{seq['seq_id']}: {e}")
+    
+    elapsed = time.time() - start_time
+    
+    # 统计
+    print(f"\n{'='*60}")
+    print(f"完成: {success}/{len(sequences)} 成功")
+    print(f"失败: {len(failed)}")
+    if failed:
+        print("失败列表:", [f[0] for f in failed])
+    print(f"耗时: {elapsed:.0f}秒 ({elapsed/60:.1f}分钟)")
+    if len(pending) > 0:
+        print(f"平均: {elapsed/len(pending):.1f}秒/序列")
 
 
 if __name__ == "__main__":
