@@ -71,7 +71,16 @@ def process_window(all_text: str, start: int, total_chars: int, timeout: int):
         focus_text = all_text[start:start + FOCUS_CHARS]
         after_text = all_text[start + FOCUS_CHARS:window_end]
         
-        prompt = f"""请为以下内容生成章节大纲。
+        prompt = f"""你是一个专业的网文剧情架构师。请将以下章节内容转换为L2格式大纲。
+
+L2格式说明：
+1. 按"序列"组织，每个序列是一个完整的剧情单元
+2. 每个序列包含：
+   - 序列名称（如"拍卖会打脸"、"初遇反派"）
+   - 功能类型：铺垫/转折/反馈/获得/斗争/胜利
+   - 情绪走向：如"压抑→爆发→余韵"
+   - 爽点类型：如"打脸、装逼、逆袭"
+   - 详细剧情（保留关键对话、决策、冲突）
 
 重点关注区域：
 {focus_text}
@@ -79,17 +88,36 @@ def process_window(all_text: str, start: int, total_chars: int, timeout: int):
 后续背景：
 {after_text}
 
-生成JSON格式大纲：
-{{"chapters": [{{"chapter_num": 1, "title": "章节标题", "summary": "摘要"}}]}}
+输出JSON格式：
+{{
+  "sequences": [
+    {{
+      "name": "序列名称",
+      "functions": ["铺垫", "转折"],
+      "emotion": "压抑→爆发",
+      "appeal_types": ["打脸"],
+      "plot": "详细剧情描述，包含关键对话、决策、冲突结果..."
+    }}
+  ]
+}}
 
-注意：只输出JSON，不要其他内容。"""
+只输出JSON，不要其他内容。"""
     else:
         # 中间段
         before_text = all_text[window_start:start]
         focus_text = all_text[start:start + FOCUS_CHARS]
         after_text = all_text[start + FOCUS_CHARS:window_end]
         
-        prompt = f"""请为以下内容生成章节大纲。
+        prompt = f"""你是一个专业的网文剧情架构师。请将以下章节内容转换为L2格式大纲。
+
+L2格式说明：
+1. 按"序列"组织，每个序列是一个完整的剧情单元
+2. 每个序列包含：
+   - 序列名称（如"拍卖会打脸"、"初遇反派"）
+   - 功能类型：铺垫/转折/反馈/获得/斗争/胜利
+   - 情绪走向：如"压抑→爆发→余韵"
+   - 爽点类型：如"打脸、装逼、逆袭"
+   - 详细剧情（保留关键对话、决策、冲突）
 
 【前文背景】：
 {before_text}
@@ -100,10 +128,20 @@ def process_window(all_text: str, start: int, total_chars: int, timeout: int):
 【后续背景】：
 {after_text}
 
-生成JSON格式大纲：
-{{"chapters": [{{"chapter_num": N, "title": "章节标题", "summary": "摘要"}}]}}
+输出JSON格式：
+{{
+  "sequences": [
+    {{
+      "name": "序列名称",
+      "functions": ["铺垫", "转折"],
+      "emotion": "压抑→爆发",
+      "appeal_types": ["打脸"],
+      "plot": "详细剧情描述，包含关键对话、决策、冲突结果..."
+    }}
+  ]
+}}
 
-注意：只输出JSON，不要其他内容。"""
+只输出JSON，不要其他内容。"""
     
     try:
         llm = create_llm(request_timeout=timeout)
@@ -114,7 +152,7 @@ def process_window(all_text: str, start: int, total_chars: int, timeout: int):
         json_match = re.search(r'\{[\s\S]*\}', content)
         if json_match:
             data = json.loads(json_match.group())
-            return data.get('chapters', [])
+            return data.get('sequences', [])
     except Exception as e:
         print(f"    错误: {e}")
     
@@ -158,7 +196,7 @@ def main():
     
     # 并行处理
     print(f"\n开始处理...")
-    all_chapters = []
+    all_sequences = []
     start_time = time.time()
     
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
@@ -174,10 +212,10 @@ def main():
         for future in as_completed(futures):
             window_start = futures[future]
             try:
-                chapters = future.result()
-                if chapters:
-                    all_chapters.extend(chapters)
-                    print(f"  位置{window_start//1024}KB: ✓ {len(chapters)}章 (累计{len(all_chapters)})")
+                sequences = future.result()
+                if sequences:
+                    all_sequences.extend(sequences)
+                    print(f"  位置{window_start//1024}KB: ✓ {len(sequences)}序列 (累计{len(all_sequences)})")
                 else:
                     print(f"  位置{window_start//1024}KB: ⚠ 无输出")
             except Exception as e:
@@ -191,8 +229,8 @@ def main():
     
     outline = {
         "novel_name": args.name,
-        "total_chapters": len(all_chapters),
-        "chapters": all_chapters
+        "total_sequences": len(all_sequences),
+        "sequences": all_sequences
     }
     
     (output_dir / "outline.json").write_text(
@@ -201,15 +239,18 @@ def main():
     )
     
     # Markdown
-    md_lines = [f"# {args.name} - L2大纲\n\n总章节: {len(all_chapters)}章\n"]
-    for ch in all_chapters:
-        md_lines.append(f"## {ch.get('title', '未知')}")
-        md_lines.append(f"{ch.get('summary', '')}\n")
+    md_lines = [f"# {args.name} - L2大纲\n\n总序列: {len(all_sequences)}个\n"]
+    for seq in all_sequences:
+        md_lines.append(f"## 【{seq.get('name', '未知序列')}】")
+        md_lines.append(f"- 功能: {', '.join(seq.get('functions', []))}")
+        md_lines.append(f"- 情绪: {seq.get('emotion', '')}")
+        md_lines.append(f"- 爽点: {', '.join(seq.get('appeal_types', []))}")
+        md_lines.append(f"\n{seq.get('plot', '')}\n")
     
     (output_dir / "outline.md").write_text('\n'.join(md_lines), encoding='utf-8')
     
     print(f"\n{'='*60}")
-    print(f"完成: {len(all_chapters)}章")
+    print(f"完成: {len(all_sequences)}个序列")
     print(f"耗时: {elapsed:.0f}秒 ({elapsed/60:.1f}分钟)")
     print(f"输出: {output_dir}/")
 
