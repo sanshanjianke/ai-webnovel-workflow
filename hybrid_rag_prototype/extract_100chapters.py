@@ -142,7 +142,8 @@ class LayeredExtractor100:
         """切片章节"""
         print("\n【第1步：章节切片】")
         
-        pattern = r'第(\d+)章(.+?)(?=第\d+章|$)'
+        # 支持 "第X章" 和 "第X节" 两种格式
+        pattern = r'第(\d+)(章|节)(.+?)(?=第\d+(章|节)|$)'
         matches = list(re.finditer(pattern, text, re.DOTALL))
         
         print(f"  找到章节: {len(matches)}章")
@@ -151,12 +152,13 @@ class LayeredExtractor100:
         chapters = []
         for i, match in enumerate(matches[:max_chapters]):
             chapter_num = int(match.group(1))
-            title = match.group(2).strip().split('\n')[0][:30]
+            unit = match.group(2)  # 章 或 节
+            title = match.group(3).strip().split('\n')[0][:30]
             content = match.group(0).strip()
             
             chapters.append({
                 "chapter_num": chapter_num,
-                "title": f"第{chapter_num}章 {title}",
+                "title": f"第{chapter_num}{unit} {title}",
                 "content": content,
                 "word_count": len(content)
             })
@@ -256,15 +258,15 @@ class LayeredExtractor100:
         prompt_template = """你是一个专业的网文编辑。请将以下章节内容缩减为草稿版本。
 
 要求：
-1. 缩减比例约1/3，保留更多细节
-2. 保留：人物性格特征、话语模式、关键对话、事件细节、决策过程、冲突结果、设定、伏笔
+1. 输出总字数约5000字（7章合计），每章约700字
+2. 保留：人物性格特征、话语模式、关键对话原文、事件细节、决策过程、冲突结果、设定、伏笔
 3. 删除：过于冗长的环境描写、无关的过渡段落
 4. 保持连贯：缩减后剧情逻辑完整，人物形象鲜明
 
 章节内容：
 {content}
 
-直接输出缩减后的文本，每章用【第X章】分隔。"""
+直接输出缩减后的文本，每章用【第X章】分隔。确保总字数约5000字。"""
 
         for i, seq in enumerate(self.sequences):
             if seq.seq_id in existing_drafts:
@@ -279,7 +281,7 @@ class LayeredExtractor100:
             print(f"  处理序列 {i+1}/{len(self.sequences)}: 第{seq.start_chapter}-{seq.end_chapter}章...")
             
             seq_content = "\n".join([
-                f"【{c['title']}】\n{c['content']}" 
+                f"【{c['title']}】\n{c['content'][:3000]}" 
                 for c in seq.chapters
             ])
             
@@ -319,46 +321,65 @@ class LayeredExtractor100:
         return drafts
     
     def _save_drafts(self):
-        """按50-100kb汇聚草稿"""
-        print(f"\n【第4步：汇聚草稿块】")
+        """保存草稿"""
+        for draft in self.drafts:
+            filepath = self.output_dir / "03_drafts" / f"draft_{draft.seq_id:02d}.txt"
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(draft.draft_text)
+        
+        index = [{
+            "seq_id": d.seq_id,
+            "char_count": d.char_count
+        } for d in self.drafts]
+        with open(self.output_dir / "03_drafts" / "index.json", 'w', encoding='utf-8') as f:
+            json.dump(index, f, ensure_ascii=False, indent=2)
+        
+        print(f"  ✓ 草稿已保存: {len(self.drafts)}个")
+    
+    def _merge_drafts(self, target_size: int) -> List[MergedBlock]:
+        """按50KB分割草稿为多个块"""
+        print(f"\n【第4步：分割草稿块】")
         print(f"  目标块大小: {target_size//1024}KB")
         
         blocks = []
+        all_text = ""
         current_seqs = []
-        current_text = ""
         current_size = 0
         
         for draft in self.drafts:
+            # 如果当前块加上新草稿超过目标大小，且当前块不为空
             if current_size + draft.char_count > target_size and current_seqs:
+                # 保存当前块
                 block = MergedBlock(
                     block_id=len(blocks) + 1,
                     sequences=current_seqs,
-                    merged_text=current_text,
+                    merged_text=all_text,
                     char_count=current_size
                 )
                 blocks.append(block)
+                print(f"    块{block.block_id}: {block.char_count//1024}KB")
                 
-                print(f"    块{block.block_id}: {block.char_count//1024}KB (序列{len(block.sequences)}个)")
-                
+                # 重置
+                all_text = ""
                 current_seqs = []
-                current_text = ""
                 current_size = 0
             
+            all_text += f"\n\n{draft.draft_text}"
             current_seqs.append(draft)
-            current_text += f"\n\n{draft.draft_text}"
             current_size += draft.char_count
         
+        # 处理剩余内容
         if current_seqs:
             block = MergedBlock(
                 block_id=len(blocks) + 1,
                 sequences=current_seqs,
-                merged_text=current_text,
+                merged_text=all_text,
                 char_count=current_size
             )
             blocks.append(block)
-            print(f"    块{block.block_id}: {block.char_count//1024}KB (序列{len(block.sequences)}个)")
+            print(f"    块{block.block_id}: {block.char_count//1024}KB")
         
-        print(f"  ✓ 汇聚完成: {len(blocks)}个块")
+        print(f"  ✓ 分割完成: {len(blocks)}个块")
         return blocks
     
     def _save_merged_blocks(self):
@@ -379,61 +400,73 @@ class LayeredExtractor100:
         print(f"  ✓ 汇聚块已保存: {len(self.merged_blocks)}个")
     
     def _generate_l2_outline(self) -> Dict:
-        """LLM生成L2格式大纲"""
+        """LLM生成L2格式大纲 - 按150KB递交，前后各50KB做上下文"""
         print(f"\n【第5步：LLM生成L2大纲】")
         
-        prompt_template = """你是一个专业的网文大纲编辑。请根据以下草稿序列，生成L2层格式的大纲。
+        context_size = 50 * 1024  # 50KB上下文
+        focus_size = 50 * 1024    # 50KB重点处理
+        
+        # 合并所有块文本
+        all_text = ""
+        for block in self.merged_blocks:
+            all_text += block.merged_text + "\n\n"
+        
+        total_size = len(all_text)
+        print(f"  总文本: {total_size//1024}KB")
+        
+        all_chapters = []
+        processed = 0
+        
+        # 滑动窗口处理，每次移动50KB
+        start = 0
+        while start < total_size:
+            # 窗口范围：前50KB + 中间50KB + 后50KB = 150KB
+            window_start = max(0, start - context_size)
+            window_end = min(total_size, start + focus_size + context_size)
+            
+            window_text = all_text[window_start:window_end]
+            
+            # 构建prompt，明确区分上下文和重点区域
+            if start == 0:
+                # 第一段，没有前文
+                prompt = f"""你是一个专业的网文大纲编辑。请为以下内容生成L2格式大纲。
 
-L2格式要求：
-1. 每卷包含15-20章，标注卷主题
-2. 每章包含：
-   - 标题
-   - 摘要（1-2句话）
-   - 序列信息：
-     - 序列名称
-     - 功能类型（铺垫/转折/反馈/获得/斗争/胜利等）
-     - 情绪走向（压抑→爆发→余韵）
-     - 爽点类型
+重点关注区域（开头部分）：
+{window_text[:focus_size]}
+
+后续背景：
+{window_text[focus_size:]}
+
+请为重点关注区域生成详细的大纲，包含：
+1. 每章标题
+2. 摘要（1-2句话）
+3. 序列信息（名称、功能类型、情绪走向、爽点类型）
 
 输出JSON格式：
-{{
-  "novel_name": "书名",
-  "author": "作者",
-  "genre": "类型",
-  "total_chapters": 章节数,
-  "volumes": [
-    {{
-      "volume_num": 1,
-      "volume_title": "卷标题",
-      "volume_theme": "卷主题",
-      "chapters": [
-        {{
-          "chapter_num": 1,
-          "title": "第1章 xxx",
-          "summary": "章节摘要",
-          "sequences": [
-            {{
-              "name": "序列名称",
-              "functions": ["功能1", "功能2"],
-              "emotion": "情绪走向",
-              "appeal_type": "爽点类型"
-            }}
-          ]
-        }}
-      ]
-    }}
-  ]
-}}
+{{"chapters": [{{"chapter_num": 1, "title": "...", "summary": "...", "sequences": [{{"name": "...", "functions": [], "emotion": "...", "appeal_type": "..."}}]}}]}}"""
+            else:
+                # 中间段，有前后文
+                context_before = all_text[max(0, start - context_size):start]
+                focus_text = all_text[start:start + focus_size]
+                context_after = all_text[start + focus_size:start + focus_size + context_size]
+                
+                prompt = f"""你是一个专业的网文大纲编辑。请为以下内容生成L2格式大纲。
 
-草稿内容：
-{content}"""
+【前文背景】：
+{context_before}
 
-        all_chapters = []
-        
-        for i, block in enumerate(self.merged_blocks):
-            print(f"  处理块 {i+1}/{len(self.merged_blocks)}...")
+【重点关注区域】：
+{focus_text}
+
+【后续背景】：
+{context_after}
+
+请为重点关注区域生成详细的大纲，注意与前文和后文的连贯性。
+
+输出JSON格式：
+{{"chapters": [{{"chapter_num": N, "title": "...", "summary": "...", "sequences": [{{"name": "...", "functions": [], "emotion": "...", "appeal_type": "..."}}]}}]}}"""
             
-            prompt = prompt_template.format(content=block.merged_text[:30000])
+            print(f"  处理位置 {start//1024}KB/{total_size//1024}KB...")
             
             try:
                 response = self.llm.invoke(prompt)
@@ -441,24 +474,26 @@ L2格式要求：
                 
                 json_match = re.search(r'\{[\s\S]*\}', content)
                 if json_match:
-                    block_outline = json.loads(json_match.group())
-                    
-                    if 'volumes' in block_outline:
-                        for vol in block_outline['volumes']:
-                            if 'chapters' in vol:
-                                all_chapters.extend(vol['chapters'])
-                    
-                    print(f"    ✓ 提取章节: {len(all_chapters)}章")
+                    try:
+                        block_outline = json.loads(json_match.group())
+                        if 'chapters' in block_outline:
+                            all_chapters.extend(block_outline['chapters'])
+                            print(f"    ✓ 累计章节: {len(all_chapters)}章")
+                    except json.JSONDecodeError:
+                        print(f"    ⚠ JSON解析失败")
                 
                 time.sleep(1)
                 
             except Exception as e:
                 print(f"    ✗ 失败: {e}")
+            
+            # 移动窗口
+            start += focus_size
         
         outline = {
-            "novel_name": "1627崛起南海",
-            "author": "零点浪漫",
-            "genre": "历史穿越、工业建设",
+            "novel_name": "都市剑说",
+            "author": "未知",
+            "genre": "都市修仙",
             "total_chapters": len(all_chapters),
             "chapters": all_chapters
         }
@@ -523,9 +558,9 @@ L2格式要求：
 
 
 if __name__ == "__main__":
-    extractor = LayeredExtractor100(output_dir="output_100chapters_v2")
+    extractor = LayeredExtractor100(output_dir="output_dsjianshuo")
     
-    novel_path = "/home/ssjk/talk/1627崛起南海.txt"
+    novel_path = "/home/ssjk/talk/都市剑说.txt"
     
     outline = extractor.run(
         novel_path=novel_path,
