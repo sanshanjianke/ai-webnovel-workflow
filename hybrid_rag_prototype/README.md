@@ -1,312 +1,255 @@
-# 笔记6混合检索方案原型
+# 混合检索方案 - 完整实现
 
-基于笔记6提出的混合检索方案，使用LangChain实现的原型项目。
-
-## 核心概念
-
-### 传统RAG的问题
-
-笔记6分析了传统RAG在网文创作场景中的核心缺陷：
-
-1. **叙事完整性破坏** - 机械切片导致序列碎片化
-2. **序列逻辑断裂** - 情绪曲线被切断
-3. **边界切割问题** - 关键信息切在边界处
-4. **检索结果失真** - 无法支撑创作决策
-
-### 混合检索方案
-
-#### 1. 多维度切片
-
-放弃机械重叠切片，采用叙事学概念驱动的多维度切分：
-
-| 维度 | 切片单位 | 切片边界 | 适用场景 |
-|------|---------|---------|---------|
-| **剧情维度** | 序列/事件 | 序列开始/结束 | 剧情架构师查询完整情节 |
-| **人物维度** | 角色相关段落 | 人物出场/退场 | 人物设计师查询角色行为 |
-| **爽点维度** | 情绪段落 | 压抑→爆发→余韵转折点 | 网络编辑评估爽点节奏 |
-| **功能维度** | 叙事功能 | 铺垫/转折/反馈边界 | 分析剧情结构 |
-
-#### 2. 双库分离
-
-```
-向量数据库（摘要+标签+指针）  <--->  MD文本库（完整切片）
-        ↓                              ↓
-    快速检索                       提供完整上下文
-```
-
-#### 3. Agent检索专家
-
-Agent作为检索专家，负责：
-- 理解专家会议语境
-- 判断需要检索的维度
-- 调用向量数据库获取标签
-- 根据指针获取完整文本
-- 智能加工后返回给专家会议
-
-## 项目结构
-
-```
-hybrid_rag_prototype/
-├── config.py              # 配置文件
-├── sample_data.py         # 示例数据（拍卖会打脸序列）
-├── text_processor.py      # 多维度切片模块
-├── dual_storage.py        # 双库存储模块
-├── retrieval_agent.py     # Agent检索专家
-├── main.py                # 主入口（演示流程）
-├── requirements.txt       # 依赖文件
-├── README.md              # 本文件
-└── data/                  # 数据存储目录
-    ├── vector_db/         # 向量数据库
-    └── text_db/           # MD文本库
-```
+基于笔记6提出的混合检索方案，已实现完整的小说到知识库流程。
 
 ## 快速开始
 
-### 1. 安装依赖
+### 完整流程（一键运行）
 
 ```bash
-cd hybrid_rag_prototype
+cd /home/ssjk/talk/hybrid_rag_prototype
 
-# 安装核心依赖（简化演示）
-pip install langchain langchain-core langchain-chroma chromadb
-
-# 安装完整依赖（需要OpenAI API）
-pip install -r requirements.txt
+./venv/bin/python steps/run_all.py \
+    --novel /path/to/novel.txt \
+    --name "小说名" \
+    --output output
 ```
 
-### 2. 运行演示（简化版）
-
-当前原型为简化演示版本，无需embedding和LLM：
+### 分步执行
 
 ```bash
-python main.py
+# Step 1: 章节切片
+./venv/bin/python steps/step1_split_chapters.py \
+    /path/to/novel.txt --output output/01_chapters --max 300
+
+# Step 2: 序列分组
+./venv/bin/python steps/step2_create_sequences.py \
+    --input output/01_chapters --output output/02_sequences --size 7
+
+# Step 3: LLM生成草稿（并行，约17分钟）
+./venv/bin/python steps/step3_generate_drafts.py \
+    --input output/02_sequences --output output/03_drafts --workers 10
+
+# Step 4: 切分成块
+./venv/bin/python steps/step4_merge_blocks.py \
+    --input output/03_drafts --output output/04_blocks --size 50
+
+# Step 5: LLM生成L2大纲（串行，约7分钟）
+./venv/bin/python steps/step5_generate_outline.py \
+    --input output/04_blocks --output output/05_outline --name "小说名"
+
+# Step 6: 文档增强+切片（约7分钟）
+./venv/bin/python steps/step6_enrich_slices.py \
+    --input output/05_outline --output output/06_slices
+
+# Step 7: 向量存储（约1分钟）
+./venv/bin/python steps/step7_vector_store.py \
+    --input output/06_slices --output output/07_vector_db
 ```
 
-演示内容包括：
-- 加载示例数据（拍卖会打脸序列）
-- 多维度切片处理
-- 双库存储演示
-- Agent检索专家工作流
-- 与L2专家会议集成
+## 核心设计
 
-### 3. 运行完整版（需要OpenAI API）
+### 1. 多维度切片
 
-```bash
-# 设置API密钥
-export OPENAI_API_KEY=your_openai_api_key
+同一内容按4个维度切分：
 
-# 运行（需要修改main.py中的参数）
-python main.py --with-embedding --with-llm
+| 维度 | 切片单位 | 边界 | 适用场景 |
+|------|---------|------|---------|
+| plot | 序列 | 序列开始/结束 | 剧情架构师 |
+| character | 人物段落 | 人物出场/退场 | 人物设计师 |
+| emotion | 情绪段落 | 情绪转折点 | 网络编辑 |
+| function | 叙事功能 | 功能边界 | 结构分析 |
+
+### 2. 文档增强（核心创新）
+
+每个序列生成5个视角的改写：
+
+```
+原始: "李白制服郑屠"
+
+增强后:
+├─ 情节概述: 李白凭借大魔头气场震慑发狂患者郑屠
+├─ 爽点分析: 反差装逼与气场压制的完美结合
+├─ 人物关系: 李白与郑屠是压制与被压制关系
+├─ 情感弧线: 迷茫→紧张→惊讶→爽快
+└─ 读者问题: ["郑屠被李白的气场震慑产生幻觉？", ...]
 ```
 
-完整版特性：
-- 向量数据库检索功能
-- LLM智能加工
-- 自动切片（待实现）
+### 3. 混合检索
 
-## 模块说明
+**问题**：向量检索对中文专有名词效果差
 
-### text_processor.py - 多维度切片
+**方案**：向量搜索 + 关键词过滤
 
 ```python
-from text_processor import SliceProcessorAgent
+# 混合得分计算
+vector_score = 1 - min(distance / 1.5, 1)
+keyword_score = matched_keywords / total_keywords
+hybrid_score = vector_score * 0.6 + keyword_score * 0.4
+```
 
-# 创建切片处理器
-processor = SliceProcessorAgent()
+### 4. 上下文记忆
 
-# 处理切片（使用预标注数据）
-slices = processor.process_with_annotation(
-    raw_text=AUCTION_SEQUENCE,
-    annotated_data=ANNOTATED_SLICES
+Step5串行处理，保持上下文：
+
+```
+Block 1 → 提取 → 传递摘要
+    ↓
+Block 2 → 继续提取 → 传递摘要
+    ↓
+Block 3 → ...
+```
+
+## 检索使用
+
+```python
+from steps.retriever import create_retriever
+from pathlib import Path
+
+# 创建检索器
+retriever = create_retriever(
+    vector_db_path=Path('output/07_vector_db'),
+    embedding_type='dashscope',
+    api_key='your-api-key'
 )
 
-# slices包含四个维度的切片：
-# - plot: 剧情维度
-# - character: 人物维度
-# - emotion: 爽点维度
-# - function: 功能维度
+# 语义搜索
+results = retriever.search('李白怎么制服郑屠', k=3)
+for r in results:
+    print(f"{r.name} (得分: {r.score:.3f})")
+
+# 标签搜索
+results = retriever.search_by_tags({'appeal_types': '打脸'}, k=5)
+
+# 指定维度
+results = retriever.search('穿越归来', dimension='plot', k=3)
 ```
 
-### dual_storage.py - 双库存储
+## 测试结果
+
+### 数据统计（300章都市剑说）
+
+| 步骤 | 输入 | 输出 | 耗时 |
+|------|------|------|------|
+| Step 1 | 小说文件 | 300章 | <1秒 |
+| Step 2 | 300章 | 43序列 | <1秒 |
+| Step 3 | 43序列 | 43草稿(101KB) | 17分钟 |
+| Step 4 | 43草稿 | 6块(每块50KB) | <1秒 |
+| Step 5 | 6块 | 40序列+91人物 | 7分钟 |
+| Step 6 | L2大纲 | 258切片+文档增强 | 7分钟 |
+| Step 7 | 切片 | 向量库3.5MB | 1分钟 |
+
+**总计**: ~25分钟
+
+### 检索效果
+
+| 查询 | 命中序列 | 得分 |
+|------|---------|------|
+| "郑屠" | 魔头苏醒与职场首秀 | 0.614 |
+| "武疯子被枪毙" | 高速惊魂与田野对决 | 0.253 |
+| "戏弄道士" | 直播斗法与当众处刑 | 0.291 |
+| "穿越归来" | 魔头苏醒与职场首秀 | 0.294 |
+
+## API配置
+
+### LLM (GLM-5)
 
 ```python
-from dual_storage import DualStorageManager
+OPENAI_API_KEY = "sk-xxx"
+OPENAI_BASE_URL = "https://coding.dashscope.aliyuncs.com/v1"
+LLM_MODEL = "glm-5"
+```
 
-# 创建存储管理器（需要embedding）
-from langchain_openai import OpenAIEmbeddings
-embedding = OpenAIEmbeddings()
+### Embedding (text-embedding-v3)
 
-storage = DualStorageManager(
-    embedding=embedding,
-    use_local_storage=True
+```python
+EMBEDDING_API_KEY = "sk-xxx"
+EMBEDDING_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+EMBEDDING_MODEL = "text-embedding-v3"  # 1024维
+```
+
+## 目录结构
+
+```
+hybrid_rag_prototype/
+├── config.py              # 配置
+├── utils.py               # 工具函数
+├── steps/
+│   ├── step1_split_chapters.py      # 章节切片
+│   ├── step2_create_sequences.py    # 序列分组
+│   ├── step3_generate_drafts.py     # LLM生成草稿
+│   ├── step4_merge_blocks.py        # 切分成块
+│   ├── step5_generate_outline.py    # LLM生成L2大纲
+│   ├── step6_enrich_slices.py       # 文档增强+切片
+│   ├── step7_vector_store.py        # 向量存储
+│   ├── retriever.py                 # 混合检索器
+│   └── run_all.py                   # 一键运行
+└── output/
+    ├── 01_chapters/
+    ├── 02_sequences/
+    ├── 03_drafts/
+    ├── 04_blocks/
+    ├── 05_outline/
+    ├── 06_slices/
+    └── 07_vector_db/
+```
+
+## 关键特性
+
+### 断点续传
+
+所有LLM调用步骤都支持：
+
+```python
+# Step 3: 检查已完成的草稿
+if draft_file.exists():
+    continue
+
+# Step 5: 检查已完成的outline
+if outline_file.exists():
+    load_and_continue()
+
+# Step 6: 检查进度文件
+progress_file = output_dir / ".progress.json"
+```
+
+### 进度显示
+
+Step 6 带进度条：
+
+```
+[█████████████████████████░░░░░] 24/28 政治博弈与强制休假 ✓
+```
+
+### 超时重试
+
+```python
+for attempt in range(max_retries):
+    try:
+        response = llm.invoke(prompt)
+        return parse_response(response)
+    except:
+        if attempt < max_retries - 1:
+            time.sleep(2)
+```
+
+## 切换本地Embedding
+
+```python
+retriever = create_retriever(
+    vector_db_path=Path('output/07_vector_db'),
+    embedding_type='local',
+    model_path='~/下载/llama-b8580/qwen3-embedding-4b-q4_k.gguf'
 )
-
-# 存储切片
-stats = storage.store_slices(slices)
-
-# 检索
-results = storage.retrieve(
-    query="拍卖会打脸的爽点节奏",
-    dimension="emotion",
-    k=3
-)
 ```
-
-### retrieval_agent.py - Agent检索专家
-
-```python
-from retrieval_agent import L2RetrievalAgent
-
-# 创建L2检索专家（需要LLM）
-from langchain_openai import ChatOpenAI
-llm = ChatOpenAI(model="gpt-4")
-
-retrieval_agent = L2RetrievalAgent(
-    storage_manager=storage,
-    llm=llm
-)
-
-# 监听专家会议并检索
-meeting_context = {
-    "current_discussion": "评估拍卖会打脸的爽点节奏",
-    "expert_role": "editor",
-    "needs_retrieval": True
-}
-
-result = retrieval_agent.listen_and_retrieve(meeting_context)
-
-# result包含：
-# - 检索意图
-# - 检索维度
-# - 智能加工后的内容
-```
-
-## 与创作模型的集成
-
-### L2专家会议集成
-
-```python
-# 专家会议流程
-meeting_context = {
-    "current_discussion": "讨论拍卖会打脸剧情",
-    "expert_role": "architect",  # 剧情架构师
-    "needs_retrieval": True
-}
-
-# 检索专家监听并响应
-result = retrieval_agent.listen_and_retrieve(meeting_context)
-
-# 检索专家会：
-# 1. 根据专家角色判断维度（architect → plot维度）
-# 2. 检索相关剧情切片
-# 3. 智能加工后返回
-```
-
-### L3映射检索专家
-
-```python
-from retrieval_agent import L3MappingAgent
-
-mapping_agent = L3MappingAgent(storage, llm)
-
-# 检索映射规则
-rules = mapping_agent.retrieve_mapping_rules("装逼打脸-压抑阶段")
-
-# rules包含：
-# {
-#   "视角": "反派/路人内聚焦",
-#   "节奏": "慢速扩述",
-#   "话语模式": "对话+心理",
-#   "理由": "通过无知者的傲慢视角，制造信息差"
-# }
-```
-
-### L4技法检索专家
-
-```python
-from retrieval_agent import L4TechniqueAgent
-
-technique_agent = L4TechniqueAgent(storage, llm)
-
-# 检索技法示例
-examples = technique_agent.retrieve_technique_examples(
-    perspective="外聚焦",
-    rhythm="中速等述",
-    discourse_mode="动作+环境"
-)
-
-# examples包含参考文本片段
-```
-
-## 示例数据
-
-项目使用"拍卖会打脸序列"作为示例数据，包含：
-
-- **原始文本**：完整的拍卖会打脸剧情（约5000字）
-- **标注数据**：四个维度的预标注切片
-  - 剧情维度：1个完整序列
-  - 人物维度：主角、反派、鉴定师戏份
-  - 爽点维度：压抑、爆发、余韵三阶段
-  - 功能维度：铺垫、转折、反馈三功能
-
-## 业界方案对比
-
-笔记6对比了业界相近的RAG增强方案：
-
-| 方案 | 切片策略 | 索引结构 | 检索处理 | 适用场景 |
-|------|---------|---------|---------|---------|
-| Multi-Vector | 机械切分 | 摘要+原文分离 | 直接返回 | 通用 |
-| Parent Document | 小切大返回 | 层级索引 | 直接返回 | 通用 |
-| GraphRAG | 知识图谱 | 图结构 | 图遍历 | 复杂推理 |
-| **本方案** | 多维度语义切分 | 双库+Agent | Agent智能加工 | 网文创作 |
-
-## 待实现功能
-
-1. **自动切片Agent**
-   - 使用LLM自动识别序列边界
-   - 自动识别情绪转折点
-   - 自动识别人物出场/退场
-   - 自动识别叙事功能边界
-
-2. **完整版向量检索**
-   - 集成OpenAI Embedding
-   - 实现相似度检索
-   - 实现标签过滤检索
-
-3. **LLM智能加工**
-   - 爽点评估：分析情绪曲线
-   - 人物分析：提取行为模式
-   - 剧情概述：提炼关键序列
-   - 映射解析：从文本提取规则
-
-4. **与创作流程深度绑定**
-   - L1-L2-L3-L4全流程集成
-   - 检索专家自动监听
-   - 上下文传递机制
 
 ## 参考文档
 
-- [笔记6.md](../笔记6.md) - 混合检索方案详细设计
-- [README.md](../README.md) - AI辅助网文创作系统总览
-- [LangChain Multi-Vector Retriever](https://python.langchain.com/docs/modules/data_connection/retrievers/multi_vector)
-- [LangChain Parent Document Retriever](https://python.langchain.com/docs/modules/data_connection/retrievers/parent_document)
-- [GraphRAG (Microsoft)](https://microsoft.github.io/graphrag/)
-
-## 作者说明
-
-本项目是笔记6混合检索方案的LangChain原型实现，用于验证方案的可行性。
-
-当前版本：
-- 简化演示版（无embedding，无LLM）
-- 使用预标注数据
-- 核心架构已实现
-
-完整版需要：
-- OpenAI API密钥
-- 自动切片Agent
-- LLM智能加工
+- [笔记6.md](../笔记6.md) - 混合检索方案设计
+- [笔记7.md](../笔记7.md) - 实现文档
+- [WORK_STATE.md](WORK_STATE.md) - 工作状态
 
 ---
 
-创建时间：2026-03-29
-状态：原型完成，待完善
+更新时间：2026-03-30
+状态：实现完成，测试通过

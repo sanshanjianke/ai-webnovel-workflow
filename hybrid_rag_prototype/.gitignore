@@ -5,3 +5,6 @@ output*/
 *.txt
 !README.txt
 data/
+.env
+test_output/
+*.egg-info/

@@ -135,7 +135,7 @@ python utils.py
 ### 已配置
 
 - **API Base URL**: https://coding.dashscope.aliyuncs.com/v1
-- **API Key**: sk-sp-2fe4558782804e59a3353e2439b7b11c
+- **API Key**: 从环境变量获取（见.env.example）
 - **LLM Model**: glm-5
 - **Embedding Model**: embedding-3（待测试）
 

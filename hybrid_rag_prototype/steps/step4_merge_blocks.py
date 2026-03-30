@@ -12,6 +12,7 @@
 
 import json
 import argparse
+import re
 from pathlib import Path
 
 
@@ -33,6 +34,13 @@ def load_drafts(input_dir: Path):
     return drafts
 
 
+def clean_section_headers(text: str) -> str:
+    """移除章节标题，如 **【第1节 - XXX】** """
+    text = re.sub(r'\*\*【第\d+节[^】]*】\*\*\n*', '', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
 def merge_and_split(drafts: list, block_size_kb: int = 50):
     """
     合并草稿并按固定大小切分
@@ -44,8 +52,8 @@ def merge_and_split(drafts: list, block_size_kb: int = 50):
     Returns:
         块列表: [{"block_id": 1, "text": "..."}]
     """
-    # 合并所有草稿
-    all_text = "\n\n".join([d['text'] for d in drafts])
+    cleaned_drafts = [clean_section_headers(d['text']) for d in drafts]
+    all_text = "\n\n".join(cleaned_drafts)
     total_chars = len(all_text)
     
     # 注意：中文字符UTF-8编码约3字节
