@@ -26,8 +26,10 @@ Chroma runs embedded. SQLite zero-config. No Docker required.
 
 ## Directory Structure
 
+> 标注 `TBD` 的目录为待创建。当前已有 `hybrid_rag_prototype/`、`.claude/skills/`、`papers/`、笔记及 L1-L4 技能文档。
+
 ```
-backend/
+backend/                       # TBD — Python/FastAPI
 ├── main.py                    # FastAPI app entry point
 ├── core/
 │   ├── protocols/             # ABC interfaces (all pluggable components)
@@ -43,16 +45,24 @@ backend/
 │   └── l4/                    # L4 strategies
 ├── meeting_protocols/         # Auto-discovered meeting protocols
 ├── api/                       # FastAPI route handlers
-└── services/                  # Independent services (worldbook_manager, rag_indexer)
+├── services/                  # Independent services (worldbook_manager, rag_indexer)
+└── tests/                     # pytest test suite
 
-data/
+data/                          # TBD — runtime data
 ├── user/                      # User-level: config, tags, prompts, templates
 └── projects/{name}/           # Project-level: worldbook, outputs, logs
 
-frontend/
-├── src/pages/                 # 7 page components
-├── src/components/            # chat/, tags/, outline/
-└── src/lib/sse.js             # EventSource wrapper
+frontend/                      # TBD — Vue 3
+├── src/
+│   ├── pages/                 # 7 page components
+│   ├── components/            # chat/, tags/, outline/
+│   └── lib/sse.js             # EventSource wrapper
+├── package.json
+└── tests/
+
+hybrid_rag_prototype/          # ✅ 已有 — 笔记7的RAG原型
+.claude/skills/                # ✅ 已有 — L1-L4技能定义
+papers/                        # ✅ 已有 — 参考论文
 ```
 
 ## Coding Conventions
