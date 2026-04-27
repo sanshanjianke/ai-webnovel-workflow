@@ -171,9 +171,11 @@ All modules are auto-discovered from `backend/modules/` and `backend/meeting_pro
 
 The registry scans `.py` files for classes that inherit from registered ABCs. Config file selects which implementation to use by its registry key, not by class path.
 
+**Adding a new module**: drop a `.py` file into the appropriate subdirectory of `backend/modules/`. Class must subclass the matching ABC. Module key = class name in lowercase_snake_case. Example: `backend/modules/rag/graph_rag.py` with class `GraphRAGRetriever(BaseRAGAgent)` registers as key `graph_rag_retriever`.
+
 ## Configuration
 
-`user/config.yaml` controls module selection:
+`data/user/config.yaml` controls module selection:
 ```yaml
 pipeline:
   l2:
@@ -199,6 +201,34 @@ llm:
   embedding: text-embedding-v3
 ```
 
+## Pipeline Engine Flow
+
+```
+PipelineEngine.run(user_input, mode)
+    │
+    ├─ L1.generate(user_input)          → VisionDocument
+    │       │
+    │       └─ (user reviews vision, clicks continue)
+    │
+    ├─ L2.generate_outline(vision, ...)
+    │       │
+    │       ├─ MeetingProtocol.get_speaking_order()
+    │       ├─ for each (expert_id, type):
+    │       │      Expert.speak(outline, context)
+    │       │      → SSE yield "expert_speak" event
+    │       │      if semi_auto or decision_needed:
+    │       │         → SSE yield "waiting_user" event
+    │       │         → await human_feedback() (frontend POST /decide or /continue)
+    │       ├─ Auto-insert RAG/WorldBook results → SSE yield "rag_insert"/"worldbook_insert"
+    │       └─ MeetingProtocol.format_output(history) → Outline
+    │
+    ├─ L3.generate_chapter_plan(outline) → ChapterPlan
+    │       │
+    │       └─ (user reviews tags, edits instructions)
+    │
+    └─ L4.render(plan)                   → SSE stream of prose text
+```
+
 ## API Conventions
 
 - REST POST/GET for user operations (project CRUD, config, label submission, decision actions)
@@ -206,6 +236,27 @@ llm:
 - SSE format: `event: {type}\ndata: {json}\n\n`
 - SSE event types: `expert_speak`, `user_message`, `rag_insert`, `worldbook_insert`, `waiting_user`, `error`, `done`
 - Frontend uses browser-native `EventSource` (no WebSocket library needed)
+
+### SSE Implementation Pattern
+
+Backend (FastAPI):
+```python
+@app.get("/api/projects/{id}/l2/stream")
+async def l2_stream(id: str):
+    async def event_gen():
+        meeting = MeetingEngine(project_id=id)
+        async for event in meeting.run():
+            yield f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
+```
+
+Frontend (Vue):
+```javascript
+const source = new EventSource(`/api/projects/${id}/l2/stream`)
+source.addEventListener('expert_speak', e => appendMessage(JSON.parse(e.data)))
+source.addEventListener('waiting_user', e => enableButtons())
+source.addEventListener('done', e => source.close())
+```
 
 ## L2 Expert Meeting (Chat-Style UI)
 
@@ -222,11 +273,19 @@ Collaboration modes:
 - `full_auto`: experts auto-speak; if user types a message, auto-switches to semi_auto
 - `manual`: user specifies which expert speaks next
 
+Meeting protocol implementations (in `backend/meeting_protocols/`):
+
+| Protocol | Speaking Order | Use Case |
+|----------|---------------|----------|
+| `character_driven` | CharacterDesigner(main) → PlotArchitect(supplement) → WebEditor(review) | Character-driven stories |
+| `plot_driven` | PlotArchitect(main) → WebEditor(review) → CharacterDesigner(supplement) | Plot-driven stories |
+| `market_driven` | WebEditor(main) → PlotArchitect(supplement) → CharacterDesigner(review) | Market-driven stories |
+
 ## L3/L4 Tag-Based Instruction System
 
 L3/L4 use drag-and-drop tag system instead of free-text:
 - Each tag is a JSON object with `id`, `name`, `category`, `layer`, `prompt`, `conflicts[]`, `synergies[]`, `example`
-- Tags stored in `user/tags/l3_tags.json` and `user/tags/l4_tags.json` (user-level, shared across projects)
+- Tags stored in `data/user/tags/l3_tags.json` and `data/user/tags/l4_tags.json` (user-level, shared across projects)
 - Users can: (1) edit instruction text directly, (2) drag tags from panel, (3) delete tags, (4) click tag to edit its prompt
 - Tag `conflicts` are enforced (mutually exclusive tags can't co-exist)
 - Tag `synergies` are highlighted as recommendations
@@ -234,6 +293,20 @@ L3/L4 use drag-and-drop tag system instead of free-text:
 
 L3 tags: perspective, pacing, information control, discourse mode, emotion anchors
 L4 tags: style, sentence patterns, descriptive techniques, narrative-to-text (★), reference examples
+
+Tag JSON structure:
+```json
+{
+  "id": "focal_internal_villain",
+  "name": "内聚焦·反派视角",
+  "category": "视角",
+  "layer": "L3",
+  "prompt": "使用内聚焦视角，以反派角色的认知范围呈现场景。只描写反派能看到、听到、想到的内容。不写全知信息。",
+  "conflicts": ["零聚焦·全知叙述", "外聚焦·客观镜头"],
+  "synergies": ["慢速扩述·细节展开", "大量对话·对峙冲突"],
+  "example": "他看着那个穷小子，嘴角勾起一抹讥笑。又是一个来凑热闹的乞丐吗？"
+}
+```
 
 ## Multi-Dimensional Function Annotation
 
@@ -262,9 +335,18 @@ Propp's 6 functions are retained as shortcuts: 获得→推进, 禁令→铺垫,
 4-layer structure: 核心层(permanent) → 活跃层(real-time updates) → 归档层(compressed summaries) → 索引层(metadata).
 
 Entry format (ST-inspired JSON):
-- `id`, `keys[]` (primary triggers), `secondary_keys[]`
-- `content` (structured state text)
-- `constant` (always active vs. selective), `priority`, `position` (injection placement), `selective`
+```json
+{
+  "id": "char_lizhou_001",
+  "keys": ["老周", "周师傅"],
+  "secondary_keys": ["拍卖行"],
+  "content": "老周，金丹期鉴定师，青云拍卖行首席...",
+  "constant": false,
+  "priority": 10,
+  "position": "before_char",
+  "selective": true
+}
+```
 
 Key behaviors:
 - **Version chain**: character state stored as `[ch1-30:筑基]→[ch31-80:金丹]→[ch81-now:元婴]`, never overwritten
@@ -272,7 +354,7 @@ Key behaviors:
 - **Auto-compression**: completed sequences compressed to one-line summaries in archive layer
 - **Trigger word self-maintenance**: Administrator Agent monitors and optimizes triggers
 
-## World Book Administrator Agent
+### World Book Administrator Agent
 
 Meta-layer agent, post-processing only. Runs after each sequence/chapter completion:
 1. Read output → extract changes (characters, items, relationships, foreshadowing, factions)
@@ -280,6 +362,8 @@ Meta-layer agent, post-processing only. Runs after each sequence/chapter complet
 3. Conflict detection (vs. existing settings) → warn user if found
 4. Compress/archive old entries
 5. Produce: updated World Book + change summary
+
+Implemented in `backend/services/worldbook_manager.py`. Called automatically at sequence end if `worldbook.auto_manage: true` in config.
 
 ## RAG System
 
@@ -293,6 +377,8 @@ Sequence complete → immediate keyword inverted index (seconds, low precision)
                   → async background vector index pipeline (~25 min, high precision)
 Retrieval: use vector if indexed, fall back to keyword
 ```
+
+`rag_indexer.py` in `backend/services/` handles the dual-layer indexing.
 
 ## Data Persistence
 
@@ -323,6 +409,13 @@ SSE interruption: EventSource auto-reconnects, frontend preserves received text.
 - Config: YAML, loaded at startup, mutable via Settings page
 - Frontend: Vue 3 Composition API, single-file components
 - SSE streams: always yield a final `done` event to signal stream completion to frontend
+
+## Reference Documents
+
+- `笔记1-7.md`: theoretical foundations, RAG prototype implementation
+- `笔记8.md`: World Book detailed design, three-way synergy (World Book + RAG history + RAG technique)
+- `笔记9.md`: multi-dimensional function classification matrix, L2 output format upgrade
+- `笔记10.md`: full software framework discussion and decisions
 
 ## Deployment
 
