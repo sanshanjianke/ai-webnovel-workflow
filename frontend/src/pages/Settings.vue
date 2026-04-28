@@ -131,6 +131,15 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.settings {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  padding: 1.5rem;
+}
+
 .settings h1 {
   margin-bottom: 1.5rem;
 }

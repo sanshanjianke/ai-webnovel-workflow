@@ -6,9 +6,9 @@
         <router-link to="/" class="btn">← 返回仪表盘</router-link>
         <div class="layer-nav">
           <router-link :to="`/l1?projectId=${projectId}`" class="btn">L1</router-link>
-          <router-link :to="`/l2/${projectId}`" class="btn active">L2</router-link>
-          <router-link :to="`/l3/${projectId}`" class="btn">L3</router-link>
-          <router-link :to="`/l4/${projectId}`" class="btn">L4</router-link>
+          <router-link :to="`/l2?projectId=${projectId}`" class="btn active">L2</router-link>
+          <router-link :to="`/l3?projectId=${projectId}`" class="btn">L3</router-link>
+          <router-link :to="`/l4?projectId=${projectId}`" class="btn">L4</router-link>
         </div>
       </div>
     </div>
@@ -57,13 +57,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import MarkdownIt from 'markdown-it'
 
 const route = useRoute()
-const projectId = route.params.projectId
+const projectId = computed(() => route.query.projectId)
 
 const md = new MarkdownIt()
 
@@ -93,12 +93,16 @@ const scrollToBottom = async () => {
 }
 
 const startMeeting = async () => {
+  if (!projectId.value) {
+    alert('请先从仪表盘选择项目')
+    return
+  }
   messages.value = []
   currentRound.value = 0
   outline.value = null
   
   const eventSource = new EventSource(
-    `/api/projects/${projectId}/l2/stream?collaboration_mode=${collaborationMode.value}`
+    `/api/projects/${projectId.value}/l2/stream?collaboration_mode=${collaborationMode.value}`
   )
   
   eventSource.onmessage = (event) => {
@@ -165,7 +169,7 @@ const handleMessage = (data) => {
 }
 
 const approve = async () => {
-  await axios.post(`/api/projects/${projectId}/l2/feedback`, {
+  await axios.post(`/api/projects/${projectId.value}/l2/feedback`, {
     action: 'approve',
     message: ''
   })
@@ -188,7 +192,7 @@ const sendUserMessage = async () => {
     timestamp: new Date().toISOString()
   })
   
-  await axios.post(`/api/projects/${projectId}/l2/feedback`, {
+  await axios.post(`/api/projects/${projectId.value}/l2/feedback`, {
     action: 'modify',
     message: userInput.value
   })
@@ -201,15 +205,61 @@ onMounted(startMeeting)
 </script>
 
 <style scoped>
+.l2-meeting {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 1.5rem;
+}
+
 .l2-meeting h1 {
   margin-bottom: 1.5rem;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+  flex-shrink: 0;
+}
+
+.page-header h1 {
+  margin: 0;
+}
+
+.nav-actions {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.layer-nav {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.layer-nav .btn {
+  padding: 0.5rem 1rem;
+  min-width: 3rem;
+}
+
+.layer-nav .btn.active {
+  background: #3498db;
+  color: white;
 }
 
 .meeting-layout {
   display: grid;
   grid-template-columns: 1fr 300px;
   gap: 1.5rem;
-  height: calc(100vh - 200px);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .chat-area {
@@ -302,40 +352,6 @@ onMounted(startMeeting)
   font-size: 0.875rem;
 }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-  flex-wrap: wrap;
-  gap: 1rem;
-}
-
-.page-header h1 {
-  margin: 0;
-}
-
-.nav-actions {
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-}
-
-.layer-nav {
-  display: flex;
-  gap: 0.25rem;
-}
-
-.layer-nav .btn {
-  padding: 0.5rem 1rem;
-  min-width: 3rem;
-}
-
-.layer-nav .btn.active {
-  background: #3498db;
-  color: white;
-}
-
 @media (max-width: 768px) {
   .page-header {
     flex-direction: column;
@@ -345,6 +361,10 @@ onMounted(startMeeting)
   .nav-actions {
     width: 100%;
     flex-wrap: wrap;
+  }
+  
+  .meeting-layout {
+    grid-template-columns: 1fr;
   }
 }
 </style>

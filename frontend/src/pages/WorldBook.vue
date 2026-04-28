@@ -97,7 +97,7 @@ import { useRoute } from 'vue-router'
 import axios from 'axios'
 
 const route = useRoute()
-const projectId = route.params.projectId
+const projectId = computed(() => route.query.projectId)
 
 const entries = ref([])
 const commits = ref([])
@@ -124,12 +124,12 @@ const secondaryKeysText = computed({
 })
 
 const fetchEntries = async () => {
-  const res = await axios.get(`/api/projects/${projectId}/worldbook`)
+  const res = await axios.get(`/api/projects/${projectId.value}/worldbook`)
   entries.value = res.data.entries || []
 }
 
 const fetchCommits = async () => {
-  const res = await axios.get(`/api/projects/${projectId}/worldbook/commits`)
+  const res = await axios.get(`/api/projects/${projectId.value}/worldbook/commits`)
   commits.value = res.data.commits || []
 }
 
@@ -143,9 +143,9 @@ const saveEntry = async () => {
   if (!form.value.id || !form.value.content) return
   
   if (editingEntry.value) {
-    await axios.put(`/api/projects/${projectId}/worldbook/entry/${form.value.id}`, form.value)
+    await axios.put(`/api/projects/${projectId.value}/worldbook/entry/${form.value.id}`, form.value)
   } else {
-    await axios.post(`/api/projects/${projectId}/worldbook`, form.value)
+    await axios.post(`/api/projects/${projectId.value}/worldbook`, form.value)
   }
   
   cancelEdit()
@@ -154,7 +154,7 @@ const saveEntry = async () => {
 
 const deleteEntry = async (id) => {
   if (confirm('确定删除此条目？')) {
-    await axios.delete(`/api/projects/${projectId}/worldbook/entry/${id}`)
+    await axios.delete(`/api/projects/${projectId.value}/worldbook/entry/${id}`)
     fetchEntries()
   }
 }
@@ -168,7 +168,7 @@ const cancelEdit = () => {
 const commitChanges = async () => {
   const message = prompt('请输入提交说明:', '手动提交')
   if (message) {
-    await axios.post(`/api/projects/${projectId}/worldbook/commit?message=${encodeURIComponent(message)}`)
+    await axios.post(`/api/projects/${projectId.value}/worldbook/commit?message=${encodeURIComponent(message)}`)
     fetchCommits()
   }
 }
@@ -185,6 +185,15 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.worldbook {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 1.5rem;
+}
+
 .worldbook h1 {
   margin-bottom: 1.5rem;
 }

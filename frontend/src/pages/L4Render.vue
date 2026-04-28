@@ -6,9 +6,9 @@
         <router-link to="/" class="btn">← 返回仪表盘</router-link>
         <div class="layer-nav">
           <router-link :to="`/l1?projectId=${projectId}`" class="btn">L1</router-link>
-          <router-link :to="`/l2/${projectId}`" class="btn">L2</router-link>
-          <router-link :to="`/l3/${projectId}`" class="btn">L3</router-link>
-          <router-link :to="`/l4/${projectId}`" class="btn active">L4</router-link>
+          <router-link :to="`/l2?projectId=${projectId}`" class="btn">L2</router-link>
+          <router-link :to="`/l3?projectId=${projectId}`" class="btn">L3</router-link>
+          <router-link :to="`/l4?projectId=${projectId}`" class="btn active">L4</router-link>
         </div>
       </div>
     </div>
@@ -69,13 +69,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import MarkdownIt from 'markdown-it'
 
 const route = useRoute()
-const projectId = route.params.projectId
+const projectId = computed(() => route.query.projectId)
 
 const md = new MarkdownIt()
 
@@ -91,7 +91,7 @@ const renderMarkdown = (text) => {
 
 const loadChapterPlan = async () => {
   try {
-    const res = await axios.get(`/api/projects/${projectId}/l3/plan`)
+    const res = await axios.get(`/api/projects/${projectId.value}/l3/plan`)
     chapterPlan.value = res.data.chapter_plan
   } catch (e) {
     console.log('No chapter plan yet')
@@ -100,7 +100,7 @@ const loadChapterPlan = async () => {
 
 const loadGeneratedText = async () => {
   try {
-    const res = await axios.get(`/api/projects/${projectId}/l4/text`)
+    const res = await axios.get(`/api/projects/${projectId.value}/l4/text`)
     generatedText.value = res.data.text
   } catch (e) {
     console.log('No generated text yet')
@@ -112,7 +112,7 @@ const startRender = async () => {
   streamingText.value = ''
   generatedText.value = null
   
-  const eventSource = new EventSource(`/api/projects/${projectId}/l4/stream`)
+  const eventSource = new EventSource(`/api/projects/${projectId.value}/l4/stream`)
   
   eventSource.addEventListener('text', (event) => {
     const data = JSON.parse(event.data)
@@ -157,14 +157,61 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.l4-render {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 1.5rem;
+}
+
 .l4-render h1 {
   margin-bottom: 1.5rem;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+  flex-shrink: 0;
+}
+
+.page-header h1 {
+  margin: 0;
+}
+
+.nav-actions {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.layer-nav {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.layer-nav .btn {
+  padding: 0.5rem 1rem;
+  min-width: 3rem;
+}
+
+.layer-nav .btn.active {
+  background: #3498db;
+  color: white;
 }
 
 .render-layout {
   display: grid;
   grid-template-columns: 1fr 280px;
   gap: 1.5rem;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .card-header {
@@ -231,40 +278,6 @@ onMounted(() => {
   margin-bottom: 0.5rem;
 }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-  flex-wrap: wrap;
-  gap: 1rem;
-}
-
-.page-header h1 {
-  margin: 0;
-}
-
-.nav-actions {
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-}
-
-.layer-nav {
-  display: flex;
-  gap: 0.25rem;
-}
-
-.layer-nav .btn {
-  padding: 0.5rem 1rem;
-  min-width: 3rem;
-}
-
-.layer-nav .btn.active {
-  background: #3498db;
-  color: white;
-}
-
 @media (max-width: 768px) {
   .page-header {
     flex-direction: column;
@@ -274,6 +287,10 @@ onMounted(() => {
   .nav-actions {
     width: 100%;
     flex-wrap: wrap;
+  }
+  
+  .render-layout {
+    grid-template-columns: 1fr;
   }
 }
 </style>

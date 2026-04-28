@@ -6,10 +6,10 @@
         <div class="nav-title" v-if="$route.path !== '/'">{{ pageTitle }}</div>
         <div class="nav-layers">
           <router-link to="/">仪表盘</router-link>
-          <router-link to="/l1">L1</router-link>
-          <router-link to="/l2">L2</router-link>
-          <router-link to="/l3">L3</router-link>
-          <router-link to="/l4">L4</router-link>
+          <router-link :to="navLink('/l1')">L1</router-link>
+          <router-link :to="navLink('/l2')">L2</router-link>
+          <router-link :to="navLink('/l3')">L3</router-link>
+          <router-link :to="navLink('/l4')">L4</router-link>
           <router-link to="/settings">设置</router-link>
         </div>
       </div>
@@ -32,6 +32,15 @@ import { useRoute } from 'vue-router'
 
 const route = useRoute()
 const scale = ref(1)
+
+const currentProjectId = computed(() => route.query.projectId)
+
+const navLink = (path) => {
+  if (currentProjectId.value) {
+    return `${path}?projectId=${currentProjectId.value}`
+  }
+  return path
+}
 
 const pageTitle = computed(() => {
   const titles = {

@@ -13,10 +13,10 @@ import Settings from './pages/Settings.vue'
 const routes = [
   { path: '/', component: Dashboard },
   { path: '/l1', component: L1Seed },
-  { path: '/l2/:projectId', component: L2Meeting },
-  { path: '/l3/:projectId', component: L3Narrative },
-  { path: '/l4/:projectId', component: L4Render },
-  { path: '/worldbook/:projectId', component: WorldBook },
+  { path: '/l2', component: L2Meeting },
+  { path: '/l3', component: L3Narrative },
+  { path: '/l4', component: L4Render },
+  { path: '/worldbook', component: WorldBook },
   { path: '/settings', component: Settings }
 ]
 

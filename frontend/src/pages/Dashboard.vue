@@ -15,10 +15,10 @@
         <p class="time">创建于: {{ formatDate(project.config?.created_at) }}</p>
         <div class="card-actions">
           <router-link :to="`/l1?projectId=${project.id}`" class="btn btn-primary">L1</router-link>
-          <router-link :to="`/l2/${project.id}`" class="btn btn-primary">L2</router-link>
-          <router-link :to="`/l3/${project.id}`" class="btn btn-primary">L3</router-link>
-          <router-link :to="`/l4/${project.id}`" class="btn btn-primary">L4</router-link>
-          <router-link :to="`/worldbook/${project.id}`" class="btn btn-primary">世界书</router-link>
+          <router-link :to="`/l2?projectId=${project.id}`" class="btn btn-primary">L2</router-link>
+          <router-link :to="`/l3?projectId=${project.id}`" class="btn btn-primary">L3</router-link>
+          <router-link :to="`/l4?projectId=${project.id}`" class="btn btn-primary">L4</router-link>
+          <router-link :to="`/worldbook?projectId=${project.id}`" class="btn btn-primary">世界书</router-link>
           <button class="btn btn-danger" @click="deleteProject(project.id)">删除</button>
         </div>
       </div>
@@ -98,6 +98,15 @@ onMounted(fetchProjects)
 </script>
 
 <style scoped>
+.dashboard {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  padding: 1.5rem;
+}
+
 .dashboard h1 {
   margin-bottom: 1.5rem;
 }
