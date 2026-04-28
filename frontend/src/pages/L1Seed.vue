@@ -425,7 +425,7 @@ const adjustTextareaHeight = () => {
   textarea.style.height = 'auto'
   
   // 根据内容设置新高度（有最小和最大限制）
-  const newHeight = Math.min(Math.max(textarea.scrollHeight, 28), 160) // 28px=1.75rem min, 160px=10rem max
+  const newHeight = Math.min(Math.max(textarea.scrollHeight, 22), 160) // 22px min, 160px=10rem max
   textarea.style.height = newHeight + 'px'
 }
 
@@ -1339,7 +1339,7 @@ onMounted(() => {
   border: 1px solid #ddd;
   border-radius: 8px;
   resize: none;
-  min-height: 1.75rem;
+  min-height: 22px;
   max-height: 10rem;
   height: auto;
   overflow-y: auto;
