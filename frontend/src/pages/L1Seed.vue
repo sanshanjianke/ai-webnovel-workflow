@@ -92,9 +92,11 @@
         
         <div class="chat-input-area">
           <textarea 
+            ref="inputTextarea"
             v-model="userInput" 
             placeholder="输入你的想法..."
             @keydown.enter.prevent="sendMessage"
+            @input="adjustTextareaHeight"
             :disabled="aiTyping"
           ></textarea>
           <button 
@@ -335,6 +337,7 @@ const chatMessages = ref([
 const userInput = ref('')
 const aiTyping = ref(false)
 const chatContainer = ref(null)
+const inputTextarea = ref(null)
 
 // 表单状态 - 字段名与后端 VisionDocument 保持一致
 const form = ref({
@@ -414,6 +417,18 @@ watch(formattedVisionDocument, (newDoc) => {
 }, { immediate: true })
 
 // 方法
+const adjustTextareaHeight = () => {
+  const textarea = inputTextarea.value
+  if (!textarea) return
+  
+  // 重置高度以获取正确的 scrollHeight
+  textarea.style.height = 'auto'
+  
+  // 根据内容设置新高度（有最小和最大限制）
+  const newHeight = Math.min(Math.max(textarea.scrollHeight, 32), 96) // 32px=2rem min, 96px=6rem max
+  textarea.style.height = newHeight + 'px'
+}
+
 const sendMessage = async () => {
   if (!userInput.value.trim() || aiTyping.value) return
   
@@ -426,6 +441,11 @@ const sendMessage = async () => {
   
   const userText = userInput.value
   userInput.value = ''
+  
+  // 重置输入框高度
+  if (inputTextarea.value) {
+    inputTextarea.value.style.height = 'auto'
+  }
   
   await nextTick()
   scrollToBottom()
@@ -1307,19 +1327,24 @@ onMounted(() => {
 .chat-input-area {
   display: flex;
   gap: 0.5rem;
-  padding: 1rem 1.25rem;
+  padding: 0.5rem 1rem;
   border-top: 1px solid #e8e8e8;
   background: #fafafa;
+  flex-shrink: 0;
 }
 
 .chat-input-area textarea {
   flex: 1;
-  padding: 0.75rem;
+  padding: 0.5rem 0.75rem;
   border: 1px solid #ddd;
   border-radius: 8px;
   resize: none;
-  height: 3rem;
+  min-height: 2rem;
+  max-height: 6rem;
+  height: auto;
+  overflow-y: auto;
   font-family: inherit;
+  line-height: 1.5;
 }
 
 .chat-input-area textarea:focus {
