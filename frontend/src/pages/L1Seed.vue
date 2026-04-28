@@ -425,7 +425,7 @@ const adjustTextareaHeight = () => {
   textarea.style.height = 'auto'
   
   // 根据内容设置新高度（有最小和最大限制）
-  const newHeight = Math.min(Math.max(textarea.scrollHeight, 32), 96) // 32px=2rem min, 96px=6rem max
+  const newHeight = Math.min(Math.max(textarea.scrollHeight, 28), 160) // 28px=1.75rem min, 160px=10rem max
   textarea.style.height = newHeight + 'px'
 }
 
@@ -1327,7 +1327,7 @@ onMounted(() => {
 .chat-input-area {
   display: flex;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
+  padding: 0.375rem 1rem;
   border-top: 1px solid #e8e8e8;
   background: #fafafa;
   flex-shrink: 0;
@@ -1335,12 +1335,12 @@ onMounted(() => {
 
 .chat-input-area textarea {
   flex: 1;
-  padding: 0.5rem 0.75rem;
+  padding: 0.375rem 0.75rem;
   border: 1px solid #ddd;
   border-radius: 8px;
   resize: none;
-  min-height: 2rem;
-  max-height: 6rem;
+  min-height: 1.75rem;
+  max-height: 10rem;
   height: auto;
   overflow-y: auto;
   font-family: inherit;
