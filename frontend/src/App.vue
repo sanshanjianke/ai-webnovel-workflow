@@ -1,19 +1,63 @@
 <template>
   <div id="app">
     <nav class="navbar">
-      <div class="nav-brand">AI网文创作系统</div>
-      <div class="nav-links">
-        <router-link to="/">仪表盘</router-link>
-        <router-link to="/settings">设置</router-link>
+      <div class="nav-left">
+        <div class="nav-brand">AI网文创作系统</div>
+        <div class="nav-title" v-if="$route.path !== '/'">{{ pageTitle }}</div>
+        <div class="nav-layers">
+          <router-link to="/">仪表盘</router-link>
+          <router-link to="/l1">L1</router-link>
+          <router-link to="/l2">L2</router-link>
+          <router-link to="/l3">L3</router-link>
+          <router-link to="/l4">L4</router-link>
+          <router-link to="/settings">设置</router-link>
+        </div>
+      </div>
+      <div class="nav-controls">
+        <button class="btn-icon" @click="zoomOut" title="缩小">−</button>
+        <span class="zoom-level">{{ Math.round(pageScale * 100) }}%</span>
+        <button class="btn-icon" @click="zoomIn" title="放大">+</button>
+        <button class="btn-icon" @click="resetZoom" title="重置">⟲</button>
       </div>
     </nav>
-    <main class="main-content">
+    <main class="main-content" :style="{ zoom: pageScale }">
       <router-view></router-view>
     </main>
   </div>
 </template>
 
 <script setup>
+import { ref, provide, computed } from 'vue'
+import { useRoute } from 'vue-router'
+
+const route = useRoute()
+
+// 页面标题
+const pageTitle = computed(() => {
+  const titles = {
+    '/l1': 'L1 种子层',
+    '/l2': 'L2 架构层',
+    '/l3': 'L3 叙事层',
+    '/l4': 'L4 渲染层',
+    '/settings': '系统设置'
+  }
+  return titles[route.path] || ''
+})
+
+// 页面缩放
+const pageScale = ref(1)
+const zoomIn = () => {
+  pageScale.value = Math.min(pageScale.value + 0.1, 1.5)
+}
+const zoomOut = () => {
+  pageScale.value = Math.max(pageScale.value - 0.1, 0.7)
+}
+const resetZoom = () => {
+  pageScale.value = 1
+}
+
+// 提供给子组件
+provide('pageScale', pageScale)
 </script>
 
 <style>
@@ -35,27 +79,85 @@ body {
 .navbar {
   background-color: #2c3e50;
   color: white;
-  padding: 1rem 2rem;
+  padding: 0.5rem 1.5rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  height: 42px;
+}
+
+.nav-left {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
 }
 
 .nav-brand {
-  font-size: 1.25rem;
+  font-size: 1rem;
   font-weight: bold;
 }
 
-.nav-links a {
+.nav-title {
+  font-size: 0.875rem;
+  color: #3498db;
+  padding: 0.25rem 0.75rem;
+  background: rgba(52, 152, 219, 0.1);
+  border-radius: 4px;
+}
+
+.nav-layers {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.nav-layers a {
   color: white;
   text-decoration: none;
-  margin-left: 1.5rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
   opacity: 0.8;
 }
 
-.nav-links a:hover,
-.nav-links a.router-link-active {
+.nav-layers a:hover {
   opacity: 1;
+  background: rgba(255,255,255,0.1);
+}
+
+.nav-layers a.router-link-active {
+  opacity: 1;
+  background: #3498db;
+}
+
+.nav-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.btn-icon {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: rgba(255,255,255,0.1);
+  color: white;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-icon:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+.zoom-level {
+  font-size: 0.75rem;
+  color: white;
+  min-width: 3rem;
+  text-align: center;
 }
 
 .main-content {

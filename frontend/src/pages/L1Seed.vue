@@ -1,21 +1,5 @@
 <template>
   <div class="l1-seed">
-    <!-- 顶部导航栏 -->
-    <div class="page-header">
-      <div class="header-left">
-        <router-link to="/" class="btn btn-back">← 仪表盘</router-link>
-        <h1>L1 种子层</h1>
-      </div>
-      
-      <!-- 层导航 -->
-      <div class="layer-nav">
-        <router-link :to="`/l1?projectId=${projectId}`" class="btn active">L1</router-link>
-        <router-link :to="`/l2?projectId=${projectId}`" class="btn">L2</router-link>
-        <router-link :to="`/l3?projectId=${projectId}`" class="btn">L3</router-link>
-        <router-link :to="`/l4?projectId=${projectId}`" class="btn">L4</router-link>
-      </div>
-    </div>
-    
     <!-- 主内容区 -->
     <div class="main-container" :class="currentView">
       <!-- 左侧面板：对话 -->
@@ -26,7 +10,10 @@
       >
         <div class="panel-header">
           <h3>💬 创意对话</h3>
-          <span class="hint">AI引导你梳理创意</span>
+          <div class="header-actions">
+            <button class="btn btn-small" @click="resetChat">🔄 重置</button>
+            <button class="btn btn-small" @click="showSettings = true">⚙️ 设置</button>
+          </div>
         </div>
         
         <div class="chat-messages" ref="chatContainer">
@@ -39,8 +26,56 @@
               {{ msg.role === 'ai' ? '🤖' : '👤' }}
             </div>
             <div class="message-content">
-              <div class="message-text" v-html="renderMarkdown(msg.content)"></div>
-              <div class="message-time">{{ formatTime(msg.time) }}</div>
+              <!-- 思考过程（可折叠） -->
+              <div v-if="msg.thinking" class="message-thinking">
+                <div class="thinking-header" @click="msg.showThinking = !msg.showThinking">
+                  <span class="thinking-icon">{{ msg.showThinking ? '▼' : '▶' }}</span>
+                  <span>思考过程</span>
+                </div>
+                <div v-show="msg.showThinking" class="thinking-content" v-html="renderMarkdown(msg.thinking)"></div>
+              </div>
+              <!-- 用户消息编辑 -->
+              <template v-if="msg.editing && msg.role === 'user'">
+                <textarea v-model="msg.editContent" class="edit-textarea"></textarea>
+                <div class="edit-actions">
+                  <button class="btn-small btn-primary" @click="saveEditAndGenerate(idx)">保存并生成</button>
+                  <button class="btn-small" @click="saveEditOnly(idx)">仅保存</button>
+                  <button class="btn-small" @click="cancelEdit(idx)">取消</button>
+                </div>
+              </template>
+              <!-- AI消息编辑 -->
+              <template v-else-if="msg.editing && msg.role === 'ai'">
+                <textarea v-model="msg.editContent" class="edit-textarea"></textarea>
+                <div class="edit-actions">
+                  <button class="btn-small btn-primary" @click="saveEditOnly(idx)">保存</button>
+                  <button class="btn-small" @click="cancelEdit(idx)">取消</button>
+                </div>
+              </template>
+              <!-- 消息内容 -->
+              <template v-else>
+                <div class="message-text" v-html="renderMarkdown(msg.content)"></div>
+              </template>
+              <!-- 消息操作 -->
+              <div class="message-actions">
+                <div class="message-time">{{ formatTime(msg.time) }}</div>
+                <button v-if="!msg.editing" 
+                        class="btn-edit" 
+                        @click="startEdit(idx)">
+                  ✏️ 编辑
+                </button>
+                <button 
+                        class="btn-delete" 
+                        @click="deleteMessage(idx)"
+                        :disabled="aiTyping">
+                  🗑️ 删除
+                </button>
+                <button v-if="msg.role === 'ai' && idx === chatMessages.length - 1" 
+                        class="btn-regenerate" 
+                        @click="regenerateMessage(idx)"
+                        :disabled="aiTyping">
+                  🔄 重新生成
+                </button>
+              </div>
             </div>
           </div>
           
@@ -71,11 +106,7 @@
           </button>
         </div>
         
-        <div class="chat-actions">
-          <button class="btn btn-small" @click="resetChat">🔄 重置对话</button>
-          <button class="btn btn-small" @click="skipToForm">跳过对话 →</button>
         </div>
-      </div>
       
       <!-- 拖动条（仅分屏模式） -->
       <div 
@@ -208,6 +239,47 @@
       </div>
     </div>
   </div>
+  
+  <!-- 设置弹窗 -->
+  <teleport to="body">
+    <div v-if="showSettings" class="settings-modal" @click="closeSettings">
+      <div class="settings-panel" @click.stop>
+        <div class="settings-header">
+          <h3>⚙️ 对话设置</h3>
+          <button class="btn-close" @click="closeSettings">×</button>
+        </div>
+        <div class="settings-body">
+          <div class="settings-section">
+            <h4>AI 模型</h4>
+            <select v-model="chatSettings.model">
+              <option value="default">默认模型</option>
+              <option value="gpt4">GPT-4</option>
+              <option value="claude">Claude</option>
+            </select>
+          </div>
+          <div class="settings-section">
+            <h4>字体大小</h4>
+            <select v-model="chatSettings.fontSize">
+              <option value="12px">小</option>
+              <option value="14px">中</option>
+              <option value="16px">大</option>
+            </select>
+          </div>
+          <div class="settings-section">
+            <h4>字体</h4>
+            <select v-model="chatSettings.fontFamily">
+              <option value="system-ui">系统默认</option>
+              <option value="serif">衬线体</option>
+              <option value="monospace">等宽体</option>
+            </select>
+          </div>
+        </div>
+        <div class="settings-footer">
+          <button class="btn btn-primary" @click="closeSettings">确定</button>
+        </div>
+      </div>
+    </div>
+  </teleport>
 </template>
 
 <script setup>
@@ -236,6 +308,17 @@ const renderMarkdown = (text) => {
 const currentView = ref('split')
 const rightTab = ref('form')
 const showRaw = ref(false)
+
+// 设置相关
+const showSettings = ref(false)
+const chatSettings = ref({
+  model: 'default',
+  fontSize: '14px',
+  fontFamily: 'system-ui'
+})
+const closeSettings = () => {
+  showSettings.value = false
+}
 
 // 分屏宽度
 const leftWidth = ref(50)
@@ -344,54 +427,304 @@ const sendMessage = async () => {
   const userText = userInput.value
   userInput.value = ''
   
-  // 滚动到底部
   await nextTick()
   scrollToBottom()
   
-  // AI思考中
   aiTyping.value = true
   
+  // 添加AI消息占位
+  const aiMsgIdx = chatMessages.value.length
+  chatMessages.value.push({
+    role: 'ai',
+    content: '',
+    thinking: '',
+    showThinking: false,
+    time: new Date()
+  })
+  
   try {
-    // 调用后端API进行对话
-    const res = await axios.post(`/api/projects/${projectId.value}/l1/chat`, {
-      messages: chatMessages.value.map(m => ({ role: m.role, content: m.content })),
-      currentForm: form.value
-    })
-    
-    // AI回复
-    chatMessages.value.push({
-      role: 'ai',
-      content: res.data.reply,
-      time: new Date()
-    })
-    
-    // 更新表单（如果AI提取了信息）
-    if (res.data.extracted) {
-      Object.assign(form.value, res.data.extracted)
-    }
-    
-  } catch (err) {
-    // 模拟AI回复（如果没有API）
-    setTimeout(() => {
-      const reply = generateMockReply(userText)
-      chatMessages.value.push({
-        role: 'ai',
-        content: reply,
-        time: new Date()
+    // 使用fetch发送POST请求接收SSE流
+    const response = await fetch(`/api/projects/${projectId.value}/l1/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: chatMessages.value.slice(0, -1).map(m => ({ role: m.role, content: m.content })),
+        currentForm: form.value
       })
+    })
+    
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let lastDataTime = Date.now()
+    const TIMEOUT_MS = 30000 // 30秒超时
+    
+    while (true) {
+      // 检查超时
+      if (Date.now() - lastDataTime > TIMEOUT_MS) {
+        throw new Error('响应超时')
+      }
       
-      // 模拟提取信息
-      extractFromText(userText)
+      const { done, value } = await reader.read()
+      if (done) break
       
-      aiTyping.value = false
-      nextTick(scrollToBottom)
-    }, 1000)
-    return
+      // 更新最后接收数据时间
+      lastDataTime = Date.now()
+      
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6))
+            if (data.type === 'thinking') {
+              chatMessages.value[aiMsgIdx].thinking += data.content
+              chatMessages.value[aiMsgIdx].showThinking = true
+            } else if (data.type === 'chunk') {
+              chatMessages.value[aiMsgIdx].content += data.content
+              scrollToBottom()
+            } else if (data.type === 'done') {
+              if (data.thinking) {
+                chatMessages.value[aiMsgIdx].thinking = data.thinking
+              }
+              if (data.content) {
+                chatMessages.value[aiMsgIdx].content = data.content
+              }
+              if (data.extracted) {
+                Object.assign(form.value, data.extracted)
+              }
+            }
+          } catch (e) {}
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Chat error:', err)
+    if (err.message === '响应超时') {
+      chatMessages.value[aiMsgIdx].content += '\n\n[系统提示：响应超时，请重试或点击"重新生成"]'
+    } else {
+      chatMessages.value[aiMsgIdx].content = '抱歉，发生了错误，请重试。'
+    }
   }
   
   aiTyping.value = false
   await nextTick()
   scrollToBottom()
+}
+
+// 重新生成最后一条AI消息
+const regenerateMessage = async (idx) => {
+  if (aiTyping.value) return
+  
+  // 删除这条AI消息及之后的所有消息
+  chatMessages.value = chatMessages.value.slice(0, idx)
+  
+  aiTyping.value = true
+  
+  // 添加AI消息占位
+  const aiMsgIdx = chatMessages.value.length
+  chatMessages.value.push({
+    role: 'ai',
+    content: '',
+    thinking: '',
+    showThinking: false,
+    time: new Date()
+  })
+  
+  try {
+    const response = await fetch(`/api/projects/${projectId.value}/l1/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: chatMessages.value.slice(0, -1).map(m => ({ role: m.role, content: m.content })),
+        currentForm: form.value
+      })
+    })
+    
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let lastDataTime = Date.now()
+    const TIMEOUT_MS = 30000
+    
+    while (true) {
+      if (Date.now() - lastDataTime > TIMEOUT_MS) {
+        throw new Error('响应超时')
+      }
+      
+      const { done, value } = await reader.read()
+      if (done) break
+      
+      lastDataTime = Date.now()
+      
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6))
+            if (data.type === 'thinking') {
+              chatMessages.value[aiMsgIdx].thinking += data.content
+              chatMessages.value[aiMsgIdx].showThinking = true
+            } else if (data.type === 'chunk') {
+              chatMessages.value[aiMsgIdx].content += data.content
+              scrollToBottom()
+            } else if (data.type === 'done') {
+              if (data.thinking) {
+                chatMessages.value[aiMsgIdx].thinking = data.thinking
+              }
+              if (data.content) {
+                chatMessages.value[aiMsgIdx].content = data.content
+              }
+              if (data.extracted) {
+                Object.assign(form.value, data.extracted)
+              }
+            }
+          } catch (e) {}
+        }
+      }
+    }
+  } catch (err) {
+    console.error('重新生成失败:', err)
+    if (err.message === '响应超时') {
+      chatMessages.value[aiMsgIdx].content += '\n\n[系统提示：响应超时，请重试]'
+    } else {
+      chatMessages.value[aiMsgIdx].content = '抱歉，发生了错误，请重试。'
+    }
+  }
+  
+  aiTyping.value = false
+  await nextTick()
+  scrollToBottom()
+}
+
+// 编辑用户消息
+const startEdit = (idx) => {
+  chatMessages.value[idx].editing = true
+  chatMessages.value[idx].editContent = chatMessages.value[idx].content
+}
+
+const cancelEdit = (idx) => {
+  chatMessages.value[idx].editing = false
+  delete chatMessages.value[idx].editContent
+}
+
+// 仅保存编辑，不触发AI生成
+const saveEditOnly = (idx) => {
+  const newContent = chatMessages.value[idx].editContent.trim()
+  if (!newContent) return
+  
+  // 更新消息内容
+  chatMessages.value[idx].content = newContent
+  chatMessages.value[idx].editing = false
+  delete chatMessages.value[idx].editContent
+}
+
+// 保存编辑并触发AI生成
+const saveEditAndGenerate = async (idx) => {
+  const newContent = chatMessages.value[idx].editContent.trim()
+  if (!newContent) return
+  
+  // 更新消息内容
+  chatMessages.value[idx].content = newContent
+  chatMessages.value[idx].editing = false
+  delete chatMessages.value[idx].editContent
+  
+  // 删除这条消息之后的所有消息
+  chatMessages.value = chatMessages.value.slice(0, idx + 1)
+  
+  // 重新获取AI回复
+  aiTyping.value = true
+  
+  const aiMsgIdx = chatMessages.value.length
+  chatMessages.value.push({
+    role: 'ai',
+    content: '',
+    thinking: '',
+    showThinking: false,
+    time: new Date()
+  })
+  
+  try {
+    const response = await fetch(`/api/projects/${projectId.value}/l1/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: chatMessages.value.slice(0, -1).map(m => ({ role: m.role, content: m.content })),
+        currentForm: form.value
+      })
+    })
+    
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let lastDataTime = Date.now()
+    const TIMEOUT_MS = 30000
+    
+    while (true) {
+      if (Date.now() - lastDataTime > TIMEOUT_MS) {
+        throw new Error('响应超时')
+      }
+      
+      const { done, value } = await reader.read()
+      if (done) break
+      
+      lastDataTime = Date.now()
+      
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6))
+            if (data.type === 'thinking') {
+              chatMessages.value[aiMsgIdx].thinking += data.content
+              chatMessages.value[aiMsgIdx].showThinking = true
+            } else if (data.type === 'chunk') {
+              chatMessages.value[aiMsgIdx].content += data.content
+              scrollToBottom()
+            } else if (data.type === 'done') {
+              if (data.thinking) {
+                chatMessages.value[aiMsgIdx].thinking = data.thinking
+              }
+              if (data.content) {
+                chatMessages.value[aiMsgIdx].content = data.content
+              }
+              if (data.extracted) {
+                Object.assign(form.value, data.extracted)
+              }
+            }
+          } catch (e) {}
+        }
+      }
+    }
+  } catch (err) {
+    console.error('编辑后获取回复失败:', err)
+    if (err.message === '响应超时') {
+      chatMessages.value[aiMsgIdx].content += '\n\n[系统提示：响应超时，请重试]'
+    } else {
+      chatMessages.value[aiMsgIdx].content = '抱歉，发生了错误，请重试。'
+    }
+  }
+  
+  aiTyping.value = false
+  await nextTick()
+  scrollToBottom()
+}
+
+// 删除消息
+const deleteMessage = (idx) => {
+  if (aiTyping.value) return
+  if (!confirm('确定要删除这条消息吗？')) return
+  
+  // 删除这条消息及之后的所有消息
+  chatMessages.value = chatMessages.value.slice(0, idx)
 }
 
 const generateMockReply = (text) => {
@@ -425,11 +758,6 @@ const resetChat = () => {
     content: '让我们重新开始！**你想写什么类型的小说？**',
     time: new Date()
   }]
-}
-
-const skipToForm = () => {
-  // 切换到表单标签
-  rightTab.value = 'form'
 }
 
 const startResize = (e) => {
@@ -518,88 +846,108 @@ const downloadVision = () => {
   URL.revokeObjectURL(url)
 }
 
+const saveDraft = async () => {
+  if (!projectId.value) return
+  try {
+    await axios.post(`/api/projects/${projectId.value}/l1/draft`, form.value)
+  } catch (e) {
+    console.error('保存草稿失败:', e)
+  }
+}
+
+const saveChatHistory = async () => {
+  if (!projectId.value) return
+  try {
+    // 只保存非编辑状态的消息
+    const messages = chatMessages.value
+      .filter(m => !m.editing)
+      .map(m => ({
+        role: m.role,
+        content: m.content,
+        thinking: m.thinking || '',
+        time: m.time
+      }))
+    await axios.post(`/api/projects/${projectId.value}/l1/chat-history`, { messages })
+  } catch (e) {
+    console.error('保存聊天历史失败:', e)
+  }
+}
+
+const loadChatHistory = async () => {
+  if (!projectId.value) return
+  try {
+    const res = await axios.get(`/api/projects/${projectId.value}/l1/chat-history`)
+    if (res.data.messages && res.data.messages.length > 0) {
+      // 直接用历史记录替换，但确保每条消息都有必要字段
+      chatMessages.value = res.data.messages.map(m => ({
+        role: m.role,
+        content: m.content,
+        thinking: m.thinking || '',
+        showThinking: false,
+        editing: false,
+        time: new Date(m.time)
+      }))
+    }
+  } catch (e) {
+    console.error('加载聊天历史失败:', e)
+  }
+}
+
+const loadDraft = async () => {
+  if (!projectId.value) return
+  try {
+    const res = await axios.get(`/api/projects/${projectId.value}/l1/draft`)
+    if (res.data.form && Object.keys(res.data.form).length > 0) {
+      Object.assign(form.value, res.data.form)
+    }
+  } catch (e) {
+    console.error('加载草稿失败:', e)
+  }
+}
+
+let saveTimer = null
+watch(form, () => {
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    saveDraft()
+  }, 1000)
+}, { deep: true })
+
+// 自动保存chat历史
+let chatSaveTimer = null
+watch(chatMessages, () => {
+  if (chatSaveTimer) clearTimeout(chatSaveTimer)
+  chatSaveTimer = setTimeout(() => {
+    saveChatHistory()
+  }, 1000)
+}, { deep: true })
+
 onMounted(() => {
   if (projectId.value) {
+    loadDraft()
     loadVision()
+    loadChatHistory()
   }
 })
+
 </script>
 
 <style scoped>
 .l1-seed {
-  height: 100%;
+  height: calc(100vh - 42px); /* 减去顶部导航栏高度 */
   display: flex;
   flex-direction: column;
-}
-
-/* 顶部导航 */
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 1.5rem;
-  background: white;
-  border-bottom: 1px solid #e8e8e8;
-  flex-shrink: 0;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.header-left h1 {
+  /* 强制占满视口 */
+  position: fixed;
+  top: 42px;
+  left: 0;
+  right: 0;
+  bottom: 0;
   margin: 0;
-  font-size: 1.25rem;
-  font-weight: 600;
-}
-
-.btn-back {
-  padding: 0.375rem 0.75rem;
-  font-size: 0.875rem;
-}
-
-/* 标签按钮 */
-.tab-btn {
-  padding: 0.5rem 1rem;
-  border: none;
-  background: transparent;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.875rem;
-  transition: all 0.2s;
-}
-
-.tab-btn:hover {
-  background: rgba(0,0,0,0.05);
-}
-
-.tab-btn.active {
-  background: white;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  font-weight: 500;
-}
-
-.tab-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* 层导航 */
-.layer-nav {
-  display: flex;
-  gap: 0.25rem;
-}
-
-.layer-nav .btn {
-  padding: 0.5rem 0.875rem;
-  min-width: 2.5rem;
-}
-
-.layer-nav .btn.active {
-  background: #3498db;
-  color: white;
+  padding: 0;
+  width: 100vw;
+  max-width: none;
+  z-index: 100;
 }
 
 /* 主容器 */
@@ -607,6 +955,8 @@ onMounted(() => {
   flex: 1;
   display: flex;
   overflow: hidden;
+  width: 100%;
+  max-width: 100%;
 }
 
 .main-container.chat .chat-panel {
@@ -630,9 +980,10 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem 1.25rem;
+  padding: 0 1.25rem;
   border-bottom: 1px solid #e8e8e8;
   flex-shrink: 0;
+  height: 42px;
 }
 
 .panel-header h3 {
@@ -647,7 +998,31 @@ onMounted(() => {
 
 /* 对话面板 */
 .chat-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 右侧面板 */
+.right-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* 分屏模式下，左右面板填满剩余空间 */
+.main-container.split .chat-panel {
+  width: 50%;
+  flex: none;
+  height: calc(100vh - 42px - 42px);
+  max-height: calc(100vh - 42px - 42px);
+}
+
+.main-container.split .right-panel {
   flex: 1;
+  height: calc(100vh - 42px - 42px);
+  max-height: calc(100vh - 42px - 42px);
 }
 
 .chat-messages {
@@ -657,6 +1032,9 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  min-height: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .message {
@@ -686,23 +1064,232 @@ onMounted(() => {
   padding: 0.75rem 1rem;
   border-radius: 12px;
   border-top-left-radius: 4px;
+  max-width: 100%;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 .message.user .message-content {
-  background: #3498db;
-  color: white;
+  background: #e8e8e8;
+  color: #333;
   border-top-left-radius: 12px;
   border-top-right-radius: 4px;
 }
 
 .message-text {
-  line-height: 1.5;
+  line-height: 1.6;
 }
+
+.message-text :deep(p) {
+  margin: 0.5rem 0;
+}
+
+.message-text :deep(p:first-child) {
+  margin-top: 0;
+}
+
+.message-text :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.message-text :deep(strong) {
+  font-weight: 600;
+  color: #333;
+}
+
+.message-text :deep(em) {
+  font-style: italic;
+}
+
+.message-text :deep(ul), .message-text :deep(ol) {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+
+.message-text :deep(li) {
+  margin: 0.25rem 0;
+}
+
+.message-text :deep(code) {
+  background: #f5f5f5;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+.message-text :deep(pre) {
+  background: #f5f5f5;
+  padding: 0.75rem;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+
+.message-text :deep(blockquote) {
+  border-left: 3px solid #ddd;
+  padding-left: 1rem;
+  margin: 0.5rem 0;
+  color: #666;
+}
+
+.message-text :deep(h1), .message-text :deep(h2), .message-text :deep(h3) {
+  margin: 0.75rem 0 0.5rem;
+  font-weight: 600;
+}
+
+.message-text :deep(h1) { font-size: 1.2em; }
+.message-text :deep(h2) { font-size: 1.1em; }
+.message-text :deep(h3) { font-size: 1em; }
 
 .message-time {
   font-size: 0.7rem;
   opacity: 0.6;
+}
+
+/* 思考过程样式 */
+.message-thinking {
+  background: #f8f9fa;
+  border-left: 3px solid #6366f1;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  font-size: 0.9em;
+}
+
+.thinking-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  color: #6366f1;
+  font-weight: 500;
+}
+
+.thinking-header:hover {
+  background: #eee;
+}
+
+.thinking-icon {
+  font-size: 0.7em;
+}
+
+.thinking-content {
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid #e5e7eb;
+  color: #666;
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+.thinking-content :deep(p) {
+  margin: 0.25rem 0;
+}
+
+/* 消息操作 */
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   margin-top: 0.25rem;
+}
+
+.btn-regenerate {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  transition: all 0.2s;
+}
+
+.btn-regenerate:hover {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.btn-regenerate:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-edit {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  transition: all 0.2s;
+}
+
+.btn-edit:hover {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.btn-delete {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  transition: all 0.2s;
+}
+
+.btn-delete:hover {
+  background: #fee;
+  color: #e74c3c;
+}
+
+.btn-delete:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.edit-textarea {
+  width: 100%;
+  min-height: 100px;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  resize: both;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.btn-small {
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  border: 1px solid #ddd;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-small:hover {
+  background: #f5f5f5;
+}
+
+.btn-small.btn-primary {
+  background: #3498db;
+  color: white;
+  border-color: #3498db;
+}
+
+.btn-small.btn-primary:hover {
+  background: #2980b9;
 }
 
 /* 输入中动画 */
@@ -752,16 +1339,30 @@ onMounted(() => {
   border-color: #3498db;
 }
 
-.chat-actions {
-  display: flex;
-  justify-content: space-between;
-  padding: 0 1.25rem 1rem;
-  gap: 0.5rem;
+/* 标签按钮 */
+.tab-btn {
+  padding: 0.5rem 1rem;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: all 0.2s;
 }
 
-.btn-small {
-  padding: 0.375rem 0.75rem;
-  font-size: 0.75rem;
+.tab-btn:hover {
+  background: rgba(0,0,0,0.05);
+}
+
+.tab-btn.active {
+  background: white;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  font-weight: 500;
+}
+
+.tab-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* 拖动条 */
@@ -772,6 +1373,7 @@ onMounted(() => {
   transition: background 0.2s;
   position: relative;
   z-index: 10;
+  align-self: stretch;
 }
 
 .resizer:hover,
@@ -799,6 +1401,8 @@ onMounted(() => {
 .panel-tabs {
   display: flex;
   border-bottom: 1px solid #e8e8e8;
+  height: 42px;
+  align-items: center;
 }
 
 .panel-tabs .tab-btn {
@@ -806,6 +1410,7 @@ onMounted(() => {
   padding: 0.875rem;
   border-bottom: 2px solid transparent;
   border-radius: 0;
+  height: 100%;
 }
 
 .panel-tabs .tab-btn.active {
@@ -815,8 +1420,23 @@ onMounted(() => {
 
 .panel-content {
   flex: 1;
-  overflow-y: auto;
   padding: 1.25rem;
+  min-height: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.panel-content.form-content {
+  overflow-y: auto;
+}
+
+.panel-content.preview-content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 1rem;
+  height: calc(100% - 2rem);
+  max-height: calc(100% - 2rem);
 }
 
 /* 表单内容 */
@@ -889,11 +1509,13 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
+  flex-shrink: 0;
 }
 
 .preview-header h3 {
   margin: 0;
+  font-size: 0.875rem;
 }
 
 .preview-actions {
@@ -905,13 +1527,19 @@ onMounted(() => {
   background: #f8f9fa;
   border-radius: 8px;
   padding: 1rem;
-  max-height: calc(100vh - 300px);
   overflow-y: auto;
-  /* 确保滚动条显示 */
   overflow-x: hidden;
+  word-wrap: break-word;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-/* Webkit滚动条样式 */
+.preview-body .vision-structured {
+  flex: 1;
+}
+
 .preview-body::-webkit-scrollbar {
   width: 8px;
 }
@@ -970,19 +1598,20 @@ onMounted(() => {
   line-height: 1.8;
 }
 
-/* 可编辑的原文文本框 */
 .vision-raw-editor {
   width: 100%;
-  min-height: 400px;
+  height: 100%;
+  min-height: 0;
   padding: 1rem;
   border: 1px solid #ddd;
   border-radius: 4px;
   font-family: 'Courier New', Courier, monospace;
   font-size: 0.875rem;
   line-height: 1.6;
-  resize: vertical;
+  resize: none;
   background: #fafafa;
   color: #333;
+  box-sizing: border-box;
 }
 
 .vision-raw-editor:focus {
@@ -991,7 +1620,6 @@ onMounted(() => {
   background: white;
 }
 
-/* Markdown 渲染后的样式 */
 .vision-raw h1 {
   font-size: 1.5rem;
   margin: 0 0 1rem 0;
@@ -1027,7 +1655,6 @@ onMounted(() => {
   margin: 1.5rem 0;
 }
 
-/* 结构化视图中的 Markdown 内容 */
 .md-content {
   line-height: 1.7;
 }
@@ -1051,12 +1678,95 @@ onMounted(() => {
   margin-bottom: 1rem;
 }
 
+/* 头部按钮组 */
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+/* 设置弹窗 */
+.settings-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.settings-panel {
+  background: white;
+  border-radius: 8px;
+  width: 400px;
+  max-width: 90vw;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.settings-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.btn-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #999;
+}
+
+.btn-close:hover {
+  color: #333;
+}
+
+.settings-body {
+  padding: 1.25rem;
+}
+
+.settings-section {
+  margin-bottom: 1rem;
+}
+
+.settings-section:last-child {
+  margin-bottom: 0;
+}
+
+.settings-section h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.875rem;
+  color: #666;
+}
+
+.settings-section select {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.875rem;
+}
+
+.settings-footer {
+  padding: 1rem 1.25rem;
+  border-top: 1px solid #e8e8e8;
+  display: flex;
+  justify-content: flex-end;
+}
+
 /* 响应式 */
 @media (max-width: 1024px) {
-  .page-header {
-    flex-wrap: wrap;
-  }
-  
   .main-container.split {
     flex-direction: column;
   }
@@ -1073,10 +1783,6 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
-  .layer-nav {
-    display: none;
-  }
-  
   .form-row {
     grid-template-columns: 1fr;
   }
