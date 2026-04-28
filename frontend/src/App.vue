@@ -1,5 +1,5 @@
 <template>
-  <div id="app">
+  <div id="app" :style="appStyle">
     <nav class="navbar">
       <div class="nav-left">
         <div class="nav-brand">AI网文创作系统</div>
@@ -14,25 +14,25 @@
         </div>
       </div>
       <div class="nav-controls">
-        <button class="btn-icon" @click="zoomOut" title="缩小">−</button>
-        <span class="zoom-level">{{ Math.round(pageScale * 100) }}%</span>
-        <button class="btn-icon" @click="zoomIn" title="放大">+</button>
-        <button class="btn-icon" @click="resetZoom" title="重置">⟲</button>
+        <button class="btn-icon" @click="zoomOut">−</button>
+        <span class="zoom-level">{{ Math.round(scale * 100) }}%</span>
+        <button class="btn-icon" @click="zoomIn">+</button>
+        <button class="btn-icon" @click="resetZoom">⟲</button>
       </div>
     </nav>
-    <main class="main-content" :style="{ zoom: pageScale }">
+    <main class="main-content">
       <router-view></router-view>
     </main>
   </div>
 </template>
 
 <script setup>
-import { ref, provide, computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
+const scale = ref(1)
 
-// 页面标题
 const pageTitle = computed(() => {
   const titles = {
     '/l1': 'L1 种子层',
@@ -44,20 +44,19 @@ const pageTitle = computed(() => {
   return titles[route.path] || ''
 })
 
-// 页面缩放
-const pageScale = ref(1)
-const zoomIn = () => {
-  pageScale.value = Math.min(pageScale.value + 0.1, 1.5)
-}
-const zoomOut = () => {
-  pageScale.value = Math.max(pageScale.value - 0.1, 0.7)
-}
-const resetZoom = () => {
-  pageScale.value = 1
-}
+const zoomIn = () => { scale.value = Math.min(scale.value + 0.1, 1.5) }
+const zoomOut = () => { scale.value = Math.max(scale.value - 0.1, 0.7) }
+const resetZoom = () => { scale.value = 1 }
 
-// 提供给子组件
-provide('pageScale', pageScale)
+const appStyle = computed(() => ({
+  transform: `scale(${scale.value})`,
+  transformOrigin: 'top left',
+  width: `${100 / scale.value}%`,
+  height: `${100 / scale.value}%`,
+  position: 'absolute',
+  top: 0,
+  left: 0
+}))
 </script>
 
 <style>
@@ -72,8 +71,18 @@ body {
   background-color: #f5f5f5;
 }
 
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
 #app {
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f5f5f5;
 }
 
 .navbar {
@@ -160,10 +169,38 @@ body {
   text-align: center;
 }
 
+.btn-icon {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: rgba(255,255,255,0.1);
+  color: white;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-icon:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+.zoom-level {
+  font-size: 0.75rem;
+  color: white;
+  min-width: 3rem;
+  text-align: center;
+}
+
 .main-content {
-  padding: 2rem;
-  max-width: 1400px;
-  margin: 0 auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  margin: 0;
 }
 
 .btn {

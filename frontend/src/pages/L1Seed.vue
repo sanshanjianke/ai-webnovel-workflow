@@ -934,20 +934,10 @@ onMounted(() => {
 
 <style scoped>
 .l1-seed {
-  height: calc(100vh - 42px); /* 减去顶部导航栏高度 */
+  flex: 1;
   display: flex;
   flex-direction: column;
-  /* 强制占满视口 */
-  position: fixed;
-  top: 42px;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  margin: 0;
-  padding: 0;
-  width: 100vw;
-  max-width: none;
-  z-index: 100;
+  min-height: 0;
 }
 
 /* 主容器 */
@@ -1015,14 +1005,12 @@ onMounted(() => {
 .main-container.split .chat-panel {
   width: 50%;
   flex: none;
-  height: calc(100vh - 42px - 42px);
-  max-height: calc(100vh - 42px - 42px);
+  height: 100%;
 }
 
 .main-container.split .right-panel {
   flex: 1;
-  height: calc(100vh - 42px - 42px);
-  max-height: calc(100vh - 42px - 42px);
+  height: 100%;
 }
 
 .chat-messages {
