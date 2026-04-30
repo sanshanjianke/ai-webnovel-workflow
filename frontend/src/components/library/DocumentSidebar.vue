@@ -27,13 +27,23 @@
       
       <div v-if="loading" class="loading">加载中...</div>
       
-      <div v-else class="document-tree" @contextmenu.prevent="showDirContext($event, '/')">
+      <div v-else class="document-tree" 
+        @contextmenu.prevent="showDirContext($event, '/')"
+        @dragover="onDragOver($event, '/')"
+        @dragleave="onDragLeave($event)"
+        @drop="onDrop($event, '/')"
+        :class="{ 'drag-over': dragOverDir === '/' }"
+      >
         <template v-for="item in getTreeItems('/')" :key="item.path || item.uid">
           <div v-if="item.type === 'dir'" class="directory-item">
             <div 
               class="directory-header"
+              :class="{ 'drag-over': dragOverDir === item.path }"
               @click="toggleDirectory(item.path)"
               @contextmenu.prevent.stop="showDirContext($event, item.path)"
+              @dragover.stop="onDragOver($event, item.path)"
+              @dragleave.stop="onDragLeave($event)"
+              @drop.stop="onDrop($event, item.path)"
             >
               <span class="dir-icon">{{ expandedDirs.has(item.path) ? '📂' : '📁' }}</span>
               <span class="dir-name">{{ item.name }}</span>
@@ -53,6 +63,7 @@
                 @dblclick="openDocument(doc)"
                 @contextmenu.prevent="showDocContext($event, doc)"
                 @dragstart="onDragStart($event, doc)"
+                @dragend="onDragEnd($event)"
               >
                 <span class="doc-icon">{{ getDocIcon(doc.layer) }}</span>
                 <span class="doc-name">{{ doc.name }}</span>
@@ -73,6 +84,7 @@
             @dblclick="openDocument(item)"
             @contextmenu.prevent="showDocContext($event, item)"
             @dragstart="onDragStart($event, item)"
+            @dragend="onDragEnd($event)"
           >
             <span class="doc-icon">{{ getDocIcon(item.layer) }}</span>
             <span class="doc-name">{{ item.name }}</span>
@@ -295,8 +307,51 @@ const onDragStart = (event, doc) => {
   event.dataTransfer.setData('text/plain', doc.uid)
   event.dataTransfer.setData('application/json', JSON.stringify(doc))
   event.dataTransfer.setData('document-name', doc.name)
-  event.dataTransfer.effectAllowed = 'copy'
+  event.dataTransfer.effectAllowed = 'move'
   event.target.style.opacity = '0.5'
+}
+
+const onDragEnd = (event) => {
+  event.target.style.opacity = '1'
+}
+
+const dragOverDir = ref(null)
+
+const onDragOver = (event, dir) => {
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'move'
+  dragOverDir.value = dir
+}
+
+const onDragLeave = (event) => {
+  if (!event.currentTarget.contains(event.relatedTarget)) {
+    dragOverDir.value = null
+  }
+}
+
+const onDrop = async (event, targetDir) => {
+  event.preventDefault()
+  dragOverDir.value = null
+  
+  const docUid = event.dataTransfer.getData('text/plain')
+  if (!docUid) return
+  
+  const doc = documents.value.find(d => d.uid === docUid)
+  if (!doc) return
+  
+  if (doc.directory === targetDir) return
+  
+  try {
+    await fetch(`${apiBase.value}/${docUid}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ directory: targetDir })
+    })
+    await refresh()
+  } catch (err) {
+    console.error('Move document failed:', err)
+    alert('移动文档失败')
+  }
 }
 
 const openDocument = async (doc) => {
@@ -798,6 +853,15 @@ defineExpose({ refresh })
 
 .directory-header:hover {
   background: #f0f0f0;
+}
+
+.directory-header.drag-over {
+  background: #e3f2fd;
+  border: 2px dashed #3498db;
+}
+
+.document-tree.drag-over {
+  background: #f0f7ff;
 }
 
 .dir-icon {
