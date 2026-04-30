@@ -15,6 +15,7 @@
         <p class="time">创建于: {{ formatDate(project.config?.created_at) }}</p>
         <div class="card-actions">
           <router-link :to="`/l1?projectId=${project.id}`" class="btn btn-primary">L1</router-link>
+          <router-link :to="`/l1-5?projectId=${project.id}`" class="btn btn-primary">L1.5</router-link>
           <router-link :to="`/l2?projectId=${project.id}`" class="btn btn-primary">L2</router-link>
           <router-link :to="`/l3?projectId=${project.id}`" class="btn btn-primary">L3</router-link>
           <router-link :to="`/l4?projectId=${project.id}`" class="btn btn-primary">L4</router-link>

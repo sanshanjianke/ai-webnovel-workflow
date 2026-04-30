@@ -6,6 +6,7 @@
         <router-link to="/" class="btn">← 返回仪表盘</router-link>
         <div class="layer-nav">
           <router-link :to="`/l1?projectId=${projectId}`" class="btn">L1</router-link>
+          <router-link :to="`/l1-5?projectId=${projectId}`" class="btn">L1.5</router-link>
           <router-link :to="`/l2?projectId=${projectId}`" class="btn">L2</router-link>
           <router-link :to="`/l3?projectId=${projectId}`" class="btn active">L3</router-link>
           <router-link :to="`/l4?projectId=${projectId}`" class="btn">L4</router-link>
