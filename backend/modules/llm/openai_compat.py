@@ -1,4 +1,4 @@
-from typing import Iterator, Optional
+from typing import Iterator, Optional, Tuple, Union
 import httpx
 from backend.core.protocols.llm import BaseLLMProvider
 from backend.core.registry import register_module
@@ -43,7 +43,7 @@ class OpenAICompat(BaseLLMProvider):
             data = response.json()
             return data["choices"][0]["message"]["content"]
 
-    def stream(self, prompt: str, **kwargs) -> Iterator[str]:
+    def stream(self, prompt: str, **kwargs) -> Iterator[Union[Tuple[str, str], str]]:
         url = f"{self.base_url.rstrip('/')}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -54,6 +54,7 @@ class OpenAICompat(BaseLLMProvider):
         model = kwargs.get("model", self.model)
         temperature = kwargs.get("temperature", 0.7)
         max_tokens = kwargs.get("max_tokens", 4096)
+        enable_thinking = kwargs.get("enable_thinking", True)
         
         payload = {
             "model": model,
@@ -62,6 +63,16 @@ class OpenAICompat(BaseLLMProvider):
             "max_tokens": max_tokens,
             "stream": True
         }
+        
+        # 为智谱模型启用 thinking 模式
+        is_zhipu = "glm" in model.lower()
+        is_deepseek = "deepseek" in model.lower()
+        
+        if is_zhipu and enable_thinking:
+            payload["thinking"] = {"type": "enabled"}
+        
+        if is_deepseek and enable_thinking:
+            payload["reasoning_effort"] = "high"
         
         with httpx.Client(timeout=180.0) as client:
             with client.stream("POST", url, headers=headers, json=payload) as response:
@@ -75,7 +86,13 @@ class OpenAICompat(BaseLLMProvider):
                             data = json.loads(data_str)
                             if "choices" in data and len(data["choices"]) > 0:
                                 delta = data["choices"][0].get("delta", {})
-                                if "content" in delta:
-                                    yield delta["content"]
+                                
+                                reasoning = delta.get("reasoning_content")
+                                if reasoning:
+                                    yield ("thinking", reasoning)
+                                
+                                content = delta.get("content")
+                                if content:
+                                    yield ("content", content)
                         except json.JSONDecodeError:
                             continue

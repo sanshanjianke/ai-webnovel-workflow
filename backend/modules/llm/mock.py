@@ -1,4 +1,4 @@
-from typing import Iterator
+from typing import Iterator, Tuple, Union
 from backend.core.protocols.llm import BaseLLMProvider
 from backend.core.registry import register_module
 
@@ -11,7 +11,7 @@ class MockLLM(BaseLLMProvider):
     def invoke(self, prompt: str, **kwargs) -> str:
         return self.response
 
-    def stream(self, prompt: str, **kwargs) -> Iterator[str]:
+    def stream(self, prompt: str, **kwargs) -> Iterator[Union[Tuple[str, str], str]]:
         words = self.response.split()
         for word in words:
             yield word + " "

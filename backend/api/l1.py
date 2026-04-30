@@ -220,18 +220,37 @@ async def l1_chat(project_id: str, req: L1ChatRequest):
         full_response = ""
         thinking = ""
         try:
-            # 先输出思考过程
-            thinking_prompt = f"用户问：{last_user_msg}\n\n请先分析用户意图，然后回答。"
-            thinking = "分析用户问题..."
-            yield f"data: {json.dumps({'type': 'thinking', 'content': thinking}, ensure_ascii=False)}\n\n"
-            
+            chunk_count = 0
             for chunk in llm.stream("", messages=messages, temperature=0.8):
-                full_response += chunk
-                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+                chunk_count += 1
+                # 兼容两种返回格式：元组或字符串
+                if isinstance(chunk, tuple):
+                    chunk_type, chunk_content = chunk
+                    # 跳过None内容
+                    if chunk_content is None:
+                        continue
+                    print(f"[L1 Chat] Chunk {chunk_count}: type={chunk_type}, content={chunk_content[:50] if len(chunk_content) > 50 else chunk_content}")
+                    if chunk_type == "thinking":
+                        thinking += chunk_content
+                        yield f"data: {json.dumps({'type': 'thinking', 'content': chunk_content}, ensure_ascii=False)}\n\n"
+                    else:
+                        full_response += chunk_content
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk_content}, ensure_ascii=False)}\n\n"
+                else:
+                    # 旧格式：纯字符串
+                    if chunk is None:
+                        continue
+                    print(f"[L1 Chat] Chunk {chunk_count}: string format, content={chunk[:50] if len(chunk) > 50 else chunk}")
+                    full_response += chunk
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
             
+            print(f"[L1 Chat] Done. Total chunks: {chunk_count}, response length: {len(full_response)}, thinking length: {len(thinking)}")
             # 发送完成事件
             yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'thinking': thinking, 'extracted': extracted}, ensure_ascii=False)}\n\n"
         except Exception as e:
+            print(f"[L1 Chat] Error: {e}")
+            import traceback
+            traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
     
     return StreamingResponse(generate(), media_type="text/event-stream")

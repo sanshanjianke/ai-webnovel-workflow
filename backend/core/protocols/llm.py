@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Iterator, Any
+from typing import Iterator, Any, Tuple, Union
 
 
 class BaseLLMProvider(ABC):
@@ -8,5 +8,5 @@ class BaseLLMProvider(ABC):
         pass
 
     @abstractmethod
-    def stream(self, prompt: str, **kwargs) -> Iterator[str]:
+    def stream(self, prompt: str, **kwargs) -> Iterator[Union[Tuple[str, str], str]]:
         pass
