@@ -39,10 +39,11 @@ async def health():
     return {"status": "healthy"}
 
 
-from backend.api import projects, l1, l2, l3, l4, worldbook, rag, settings, worldbook_manager, library
+from backend.api import projects, l1, l1_5, l2, l3, l4, worldbook, rag, settings, worldbook_manager, library
 
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(l1.router, prefix="/api", tags=["l1"])
+app.include_router(l1_5.router, prefix="/api", tags=["l1_5"])
 app.include_router(l2.router, prefix="/api", tags=["l2"])
 app.include_router(l3.router, prefix="/api", tags=["l3"])
 app.include_router(l4.router, prefix="/api", tags=["l4"])

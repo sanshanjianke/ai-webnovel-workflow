@@ -15,6 +15,7 @@ MODULE_REGISTRY: dict[str, dict[str, type]] = {
     "rag": {},
     "worldbook": {},
     "l1": {},
+    "l1_5": {},
     "l2": {},
     "expert": {},
     "meeting_protocol": {},
@@ -65,7 +66,7 @@ def discover_modules():
 
     backend_path = Path(__file__).parent.parent
 
-    for category in ["llm", "rag", "worldbook", "l1", "l2", "l3", "l4"]:
+    for category in ["llm", "rag", "worldbook", "l1", "l1_5", "l2", "l3", "l4"]:
         module_path = backend_path / "modules" / category
         if module_path.exists():
             for _, module_name, _ in pkgutil.iter_modules([str(module_path)]):

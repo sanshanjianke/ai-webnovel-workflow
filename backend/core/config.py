@@ -28,6 +28,18 @@ class ExpertConfig(BaseModel):
     character: str = "character_designer_v1"
 
 
+class L15ExpertConfig(BaseModel):
+    author: str = "senior_author_v1"
+    reader: str = "reader_representative_v1"
+
+
+class L15Config(BaseModel):
+    meeting_protocol: str = "editor_reader"
+    collaboration_mode: str = "semi_auto"
+    max_rounds: int = 3
+    experts: L15ExpertConfig = L15ExpertConfig()
+
+
 class L2Config(BaseModel):
     meeting_protocol: str = "plot_driven"
     collaboration_mode: str = "semi_auto"
@@ -44,6 +56,7 @@ class L4Config(BaseModel):
 
 
 class PipelineConfig(BaseModel):
+    l1_5: L15Config = L15Config()
     l2: L2Config = L2Config()
     l3: L3Config = L3Config()
     l4: L4Config = L4Config()
