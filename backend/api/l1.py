@@ -80,6 +80,24 @@ async def get_vision(project_id: str):
     return {"vision": vision_data}
 
 
+@router.post("/projects/{project_id}/l1/vision")
+async def create_vision(project_id: str, data: dict):
+    pm = get_project_manager()
+    project = pm.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    vision_path = project.project_path / "outputs" / "l1_vision.json"
+    vision_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    data["created_at"] = datetime.now().isoformat()
+    
+    with open(vision_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    
+    return {"status": "created", "vision": data}
+
+
 @router.put("/projects/{project_id}/l1/vision")
 async def update_vision(project_id: str, data: dict):
     pm = get_project_manager()

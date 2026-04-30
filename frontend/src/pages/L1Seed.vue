@@ -225,13 +225,21 @@
               <button class="btn btn-small" @click="toggleRawView">
                 {{ showRaw ? '结构化' : '原文' }}
               </button>
+              <button v-if="showRaw" class="btn btn-small" @click="saveVisionEdit">保存</button>
               <button class="btn btn-small btn-primary" @click="downloadVision">
                 下载
               </button>
             </div>
           </div>
           
-          <div v-if="vision" class="preview-body">
+          <div 
+            v-if="vision" 
+            class="preview-body"
+            @dragover.prevent="onVisionDragOver"
+            @dragleave="onVisionDragLeave"
+            @drop.prevent="onVisionDrop"
+            :class="{ 'drag-over': isVisionDragOver }"
+          >
             <!-- 结构化展示 - 解析后的Markdown -->
             <div v-if="!showRaw" class="vision-structured" v-html="renderMarkdown(formattedVisionDocument)"></div>
             
@@ -241,6 +249,7 @@
           
           <div v-else class="preview-empty">
             <p>尚未生成愿景文档</p>
+            <p class="hint">可从文档库拖入文件导入</p>
             <button class="btn" @click="rightTab = 'form'">去填写表单 →</button>
           </div>
         </div>
@@ -592,6 +601,87 @@ const form = ref({
 const vision = ref(null)
 const loading = ref(false)
 const editableVisionDocument = ref('')  // 可编辑的原文
+const isVisionDragOver = ref(false)
+
+// 愿景文档拖放
+const onVisionDragOver = (event) => {
+  isVisionDragOver.value = true
+}
+
+const onVisionDragLeave = (event) => {
+  isVisionDragOver.value = false
+}
+
+const onVisionDrop = async (event) => {
+  isVisionDragOver.value = false
+  
+  const docInfo = event.dataTransfer.getData('application/json')
+  if (!docInfo) return
+  
+  try {
+    const doc = JSON.parse(docInfo)
+    const projectId = route.query.projectId
+    
+    const res = await fetch(`/api/projects/${projectId}/library/${doc.uid}`)
+    const data = await res.json()
+    
+    let content = data.content
+    if (typeof content === 'object' && content.content) {
+      content = content.content
+    }
+    if (typeof content !== 'string') {
+      content = JSON.stringify(content, null, 2)
+    }
+    
+    // 设置为愿景文档
+    editableVisionDocument.value = content
+    showRaw.value = true
+    
+    // 尝试解析为JSON更新表单
+    try {
+      const parsed = JSON.parse(content)
+      if (parsed.idea !== undefined) form.value.idea = parsed.idea || ''
+      if (parsed.genre !== undefined) form.value.genre = parsed.genre || ''
+      if (parsed.target_readers !== undefined) form.value.target_readers = parsed.target_readers || ''
+      if (parsed.core_appeal !== undefined) form.value.core_appeal = parsed.core_appeal || ''
+      if (parsed.style !== undefined) form.value.style = parsed.style || ''
+      if (parsed.rough_outline !== undefined) form.value.rough_outline = parsed.rough_outline || ''
+      if (parsed.world_setting !== undefined) form.value.world_setting = parsed.world_setting || ''
+      if (parsed.protagonist !== undefined) form.value.protagonist = parsed.protagonist || ''
+      if (parsed.golden_finger !== undefined) form.value.golden_finger = parsed.golden_finger || ''
+      if (parsed.hot_elements !== undefined) form.value.hot_elements = parsed.hot_elements || ''
+      if (parsed.expected_length !== undefined) form.value.expected_length = parsed.expected_length || ''
+      
+      vision.value = parsed
+    } catch (e) {
+      // 不是JSON，作为纯文本
+    }
+  } catch (err) {
+    console.error('Failed to import document:', err)
+  }
+}
+
+const saveVisionEdit = async () => {
+  if (!projectId.value) return
+  
+  try {
+    // 尝试解析为JSON
+    let visionData
+    try {
+      visionData = JSON.parse(editableVisionDocument.value)
+    } catch {
+      // 不是JSON，创建一个简单结构
+      visionData = { content: editableVisionDocument.value }
+    }
+    
+    // 使用POST创建/覆盖
+    await axios.post(`/api/projects/${projectId.value}/l1/vision`, visionData)
+    vision.value = visionData
+  } catch (err) {
+    console.error('Failed to save vision:', err)
+    alert('保存失败')
+  }
+}
 
 // 计算属性
 const splitStyle = computed(() => {
@@ -1819,6 +1909,12 @@ onMounted(() => {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  transition: background 0.2s, border 0.2s;
+}
+
+.preview-body.drag-over {
+  background: #e3f2fd;
+  border: 2px dashed #3498db;
 }
 
 .preview-body .vision-structured {
@@ -1961,6 +2057,12 @@ onMounted(() => {
 
 .preview-empty p {
   margin-bottom: 1rem;
+}
+
+.preview-empty .hint {
+  font-size: 0.875rem;
+  color: #bbb;
+  margin-bottom: 1.5rem;
 }
 
 /* 头部按钮组 */
