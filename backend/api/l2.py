@@ -85,7 +85,7 @@ async def l2_stream(project_id: str, collaboration_mode: str = "semi_auto"):
                 if event["type"] == "waiting_user":
                     try:
                         feedback = await asyncio.wait_for(
-                            queue.get(),
+                            feedback_queue.get(),
                             timeout=300.0
                         )
                         yield sse_format("user_feedback", feedback)
