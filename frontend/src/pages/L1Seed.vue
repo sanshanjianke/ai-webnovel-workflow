@@ -94,10 +94,14 @@
           <textarea 
             ref="inputTextarea"
             v-model="userInput" 
-            placeholder="输入你的想法..."
-            @keydown.enter.prevent="sendMessage"
+            :placeholder="inputPlaceholder"
+            @keydown.enter="handleEnterKey"
             @input="adjustTextareaHeight"
+            @dragover.prevent="onDragOver"
+            @dragleave="onDragLeave"
+            @drop.prevent="onDrop"
             :disabled="aiTyping"
+            :class="{ 'drag-over': isDragOver }"
           ></textarea>
           <button 
             class="btn btn-primary" 
@@ -338,6 +342,86 @@ const userInput = ref('')
 const aiTyping = ref(false)
 const chatContainer = ref(null)
 const inputTextarea = ref(null)
+const isDragOver = ref(false)
+const enterKeyBehavior = ref('newline')
+
+const loadUiConfig = () => {
+  const saved = localStorage.getItem('uiConfig')
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved)
+      enterKeyBehavior.value = parsed.enterKeyBehavior || 'newline'
+    } catch (e) {}
+  }
+}
+
+const handleEnterKey = (event) => {
+  const isShiftPressed = event.shiftKey
+  
+  if (enterKeyBehavior.value === 'newline') {
+    // Enter 换行，Shift+Enter 发送
+    if (isShiftPressed) {
+      event.preventDefault()
+      if (!aiTyping.value && userInput.value.trim()) {
+        sendMessage()
+      }
+    }
+    // 否则默认换行，不阻止
+  } else {
+    // Enter 发送，Shift+Enter 换行
+    if (!isShiftPressed) {
+      event.preventDefault()
+      if (!aiTyping.value && userInput.value.trim()) {
+        sendMessage()
+      }
+    }
+    // Shift+Enter 默认换行，不阻止
+  }
+}
+
+const onDragOver = (event) => {
+  isDragOver.value = true
+}
+
+const onDragLeave = (event) => {
+  isDragOver.value = false
+}
+
+const onDrop = async (event) => {
+  isDragOver.value = false
+  
+  const docInfo = event.dataTransfer.getData('application/json')
+  if (!docInfo) return
+  
+  try {
+    const doc = JSON.parse(docInfo)
+    const projectId = route.query.projectId
+    
+    const res = await fetch(`/api/projects/${projectId}/library/${doc.uid}`)
+    const data = await res.json()
+    
+    let content = data.content
+    if (typeof content === 'object' && content.content) {
+      content = content.content
+    }
+    if (typeof content !== 'string') {
+      content = JSON.stringify(content, null, 2)
+    }
+    
+    const newContent = `【${doc.name}】\n${content}`
+    userInput.value = userInput.value ? userInput.value + '\n\n' + newContent : newContent
+  } catch (err) {
+    console.error('Failed to load dropped document:', err)
+  }
+}
+
+const inputPlaceholder = computed(() => {
+  if (enterKeyBehavior.value === 'newline') {
+    return '输入你的想法... (Enter换行，Shift+Enter发送，可拖入文档)'
+  } else {
+    return '输入你的想法... (Enter发送，Shift+Enter换行，可拖入文档)'
+  }
+})
 
 // 表单状态 - 字段名与后端 VisionDocument 保持一致
 const form = ref({
@@ -849,7 +933,7 @@ const loadVision = async () => {
     // 不覆盖表单，用户填写的内容保留
     rightTab.value = 'preview'
   } catch (e) {
-    alert('尚未生成愿景文档')
+    // 尚未生成愿景文档，静默处理
   }
 }
 
@@ -943,6 +1027,7 @@ watch(chatMessages, () => {
 }, { deep: true })
 
 onMounted(() => {
+  loadUiConfig()
   if (projectId.value) {
     loadDraft()
     loadVision()
@@ -1351,6 +1436,11 @@ onMounted(() => {
 .chat-input-area textarea:focus {
   outline: none;
   border-color: #3498db;
+}
+
+.chat-input-area textarea.drag-over {
+  border-color: #3498db;
+  background: #e3f2fd;
 }
 
 /* 标签按钮 */

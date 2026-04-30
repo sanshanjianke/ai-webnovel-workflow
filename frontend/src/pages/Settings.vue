@@ -58,6 +58,18 @@
       </div>
       <button class="btn btn-primary" @click="saveConfig">保存配置</button>
     </div>
+    
+    <div class="card">
+      <h2>界面设置</h2>
+      <div class="form-group">
+        <label>回车键行为</label>
+        <select v-model="uiConfig.enterKeyBehavior">
+          <option value="newline">Enter 换行，Shift+Enter 发送</option>
+          <option value="send">Enter 发送，Shift+Enter 换行</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" @click="saveUiConfig">保存界面设置</button>
+    </div>
   </div>
 </template>
 
@@ -78,6 +90,10 @@ const pipelineConfig = reactive({
     collaboration_mode: 'semi_auto',
     max_rounds: 3
   }
+})
+
+const uiConfig = reactive({
+  enterKeyBehavior: 'newline'
 })
 
 const categoryLabels = {
@@ -124,9 +140,25 @@ const saveConfig = async () => {
   fetchConfig()
 }
 
+const loadUiConfig = () => {
+  const saved = localStorage.getItem('uiConfig')
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved)
+      uiConfig.enterKeyBehavior = parsed.enterKeyBehavior || 'newline'
+    } catch (e) {}
+  }
+}
+
+const saveUiConfig = () => {
+  localStorage.setItem('uiConfig', JSON.stringify(uiConfig))
+  alert('界面设置已保存')
+}
+
 onMounted(() => {
   fetchModules()
   fetchConfig()
+  loadUiConfig()
 })
 </script>
 

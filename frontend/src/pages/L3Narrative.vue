@@ -171,7 +171,7 @@ const loadChapterPlan = async () => {
       scenes.value = chapterPlan.value.scenes || scenes.value
     }
   } catch (e) {
-    alert('尚未生成章纲')
+    // 尚未生成章纲，静默处理
   }
 }
 

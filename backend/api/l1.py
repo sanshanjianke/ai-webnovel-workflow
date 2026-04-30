@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 import json
@@ -154,10 +155,7 @@ async def l1_chat(project_id: str, req: L1ChatRequest):
     for msg in req.messages:
         messages.append({"role": "user" if msg.role == "user" else "assistant", "content": msg.content})
     
-    # 调用LLM生成回复
-    response = llm.invoke("", messages=messages, temperature=0.8)
-    
-    # 简单的信息提取逻辑（实际可以用更复杂的NER）
+    # 简单的信息提取逻辑
     extracted = {}
     last_user_msg = req.messages[-1].content if req.messages and req.messages[-1].role == "user" else ""
     
@@ -178,7 +176,20 @@ async def l1_chat(project_id: str, req: L1ChatRequest):
     if len(last_user_msg) > 10 and len(last_user_msg) < 100:
         extracted["idea"] = last_user_msg
     
-    return L1ChatResponse(reply=response, extracted=extracted)
+    # 生成SSE流
+    def generate():
+        full_response = ""
+        try:
+            for chunk in llm.stream("", messages=messages, temperature=0.8):
+                full_response += chunk
+                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+            
+            # 发送完成事件
+            yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'extracted': extracted}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
+    
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @router.get("/projects/{project_id}/l1/draft")

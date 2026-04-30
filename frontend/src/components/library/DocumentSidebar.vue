@@ -48,9 +48,11 @@
                   archived: doc.status === 'archived',
                   draft: doc.status === 'draft'
                 }"
+                draggable="true"
                 @click="selectDocument(doc)"
                 @dblclick="openDocument(doc)"
                 @contextmenu.prevent="showDocContext($event, doc)"
+                @dragstart="onDragStart($event, doc)"
               >
                 <span class="doc-icon">{{ getDocIcon(doc.layer) }}</span>
                 <span class="doc-name">{{ doc.name }}</span>
@@ -66,9 +68,11 @@
               archived: item.status === 'archived',
               draft: item.status === 'draft'
             }"
+            draggable="true"
             @click="selectDocument(item)"
             @dblclick="openDocument(item)"
             @contextmenu.prevent="showDocContext($event, item)"
+            @dragstart="onDragStart($event, item)"
           >
             <span class="doc-icon">{{ getDocIcon(item.layer) }}</span>
             <span class="doc-name">{{ item.name }}</span>
@@ -285,6 +289,14 @@ const selectDocument = (doc) => {
   activeDocUid.value = doc.uid
   emit('document-selected', doc)
   window.dispatchEvent(new CustomEvent('document-selected', { detail: doc }))
+}
+
+const onDragStart = (event, doc) => {
+  event.dataTransfer.setData('text/plain', doc.uid)
+  event.dataTransfer.setData('application/json', JSON.stringify(doc))
+  event.dataTransfer.setData('document-name', doc.name)
+  event.dataTransfer.effectAllowed = 'copy'
+  event.target.style.opacity = '0.5'
 }
 
 const openDocument = async (doc) => {
@@ -809,10 +821,15 @@ defineExpose({ refresh })
   cursor: pointer;
   border-radius: 4px;
   font-size: 0.875rem;
+  user-select: none;
 }
 
 .document-item:hover {
   background: #f0f0f0;
+}
+
+.document-item:active {
+  opacity: 0.6;
 }
 
 .document-item.active {
