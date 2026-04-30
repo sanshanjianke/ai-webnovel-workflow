@@ -11,7 +11,7 @@
         <div class="panel-header">
           <h3>💬 创意对话</h3>
           <div class="header-actions">
-            <button class="btn btn-small" @click="showContextDialog = true">📄 上下文</button>
+            <button class="btn btn-small" @click="openContextDialog">📄 上下文</button>
             <button class="btn btn-small" @click="resetChat">🔄 重置</button>
             <button class="btn btn-small" @click="showSettings = true">⚙️ 设置</button>
           </div>
@@ -349,6 +349,18 @@ const closeSettings = () => {
 }
 
 // 上下文文本
+const visionDocument = ref(null)
+
+const loadVisionForContext = async () => {
+  if (!projectId.value) return
+  try {
+    const res = await axios.get(`/api/projects/${projectId.value}/l1/vision`)
+    visionDocument.value = res.data.vision
+  } catch (e) {
+    visionDocument.value = null
+  }
+}
+
 const fullContextText = computed(() => {
   const systemPrompt = `你是L1种子层的创作引导助手。你的任务是通过对话帮助用户梳理小说创意。
 
@@ -370,10 +382,22 @@ const fullContextText = computed(() => {
 当前对话阶段：根据已有信息判断下一步该问什么。`
   
   let text = `=== SYSTEM PROMPT ===\n${systemPrompt}\n\n`
+  
+  // 添加愿景文档
+  if (visionDocument.value) {
+    text += `=== 愿景文档 ===\n${JSON.stringify(visionDocument.value, null, 2)}\n\n`
+  }
+  
   text += `=== MESSAGES ===\n\n`
   
   for (const msg of chatMessages.value) {
     const role = msg.role === 'ai' ? 'ASSISTANT' : 'USER'
+    
+    // 添加思考过程
+    if (msg.thinking) {
+      text += `--- ${role} (思考过程) ---\n${msg.thinking}\n\n`
+    }
+    
     text += `--- ${role} ---\n${msg.content}\n\n`
   }
   
@@ -387,6 +411,11 @@ const copyContext = async () => {
   } catch (err) {
     console.error('Copy failed:', err)
   }
+}
+
+const openContextDialog = async () => {
+  await loadVisionForContext()
+  showContextDialog.value = true
 }
 
 // 分屏宽度

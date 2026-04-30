@@ -149,6 +149,27 @@ async def l1_chat(project_id: str, req: L1ChatRequest):
 - 粗略大纲
 
 当前对话阶段：根据已有信息判断下一步该问什么。"""
+    
+    # 读取愿景文档（如果存在）
+    vision_path = project.project_path / "outputs" / "l1_vision.json"
+    vision_content = None
+    if vision_path.exists():
+        try:
+            with open(vision_path, "r", encoding="utf-8") as f:
+                vision_data = json.load(f)
+                if vision_data:
+                    vision_content = json.dumps(vision_data, ensure_ascii=False, indent=2)
+        except Exception as e:
+            pass
+    
+    # 如果有愿景文档，添加到系统提示
+    if vision_content:
+        system_prompt += f"""
+
+=== 当前愿景文档 ===
+{vision_content}
+
+注意：用户可能已经生成了愿景文档，请根据文档内容回答问题。如果用户询问愿景文档内容，请基于上述文档回答。"""
 
     messages = [{"role": "system", "content": system_prompt}]
     
@@ -179,13 +200,19 @@ async def l1_chat(project_id: str, req: L1ChatRequest):
     # 生成SSE流
     def generate():
         full_response = ""
+        thinking = ""
         try:
+            # 先输出思考过程
+            thinking_prompt = f"用户问：{last_user_msg}\n\n请先分析用户意图，然后回答。"
+            thinking = "分析用户问题..."
+            yield f"data: {json.dumps({'type': 'thinking', 'content': thinking}, ensure_ascii=False)}\n\n"
+            
             for chunk in llm.stream("", messages=messages, temperature=0.8):
                 full_response += chunk
                 yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
             
             # 发送完成事件
-            yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'extracted': extracted}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'thinking': thinking, 'extracted': extracted}, ensure_ascii=False)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
     
