@@ -11,6 +11,7 @@
         <div class="panel-header">
           <h3>💬 创意对话</h3>
           <div class="header-actions">
+            <button class="btn btn-small" @click="showContextDialog = true">📄 上下文</button>
             <button class="btn btn-small" @click="resetChat">🔄 重置</button>
             <button class="btn btn-small" @click="showSettings = true">⚙️ 设置</button>
           </div>
@@ -91,6 +92,22 @@
         </div>
         
         <div class="chat-input-area">
+          <div v-if="inputAttachments.length > 0" class="input-attachments">
+            <div 
+              v-for="att in inputAttachments" 
+              :key="att.id" 
+              class="attachment-tag"
+              :class="{ expanded: att.expanded }"
+            >
+              <div class="att-name">
+                <span @dblclick="toggleAttachment(att.id)">📄 {{ att.name }}</span>
+                <button class="att-remove" @click="removeAttachment(att.id)">×</button>
+              </div>
+              <div v-if="att.expanded" class="attachment-content">
+                <textarea v-model="att.content" class="att-edit"></textarea>
+              </div>
+            </div>
+          </div>
           <textarea 
             ref="inputTextarea"
             v-model="userInput" 
@@ -106,7 +123,7 @@
           <button 
             class="btn btn-primary" 
             @click="sendMessage"
-            :disabled="!userInput.trim() || aiTyping"
+            :disabled="(!userInput.trim() && inputAttachments.length === 0) || aiTyping"
           >
             发送
           </button>
@@ -286,6 +303,25 @@
       </div>
     </div>
   </teleport>
+  
+  <!-- 上下文查看弹窗 -->
+  <teleport to="body">
+    <div v-if="showContextDialog" class="settings-modal" @click="showContextDialog = false">
+      <div class="context-panel" @click.stop>
+        <div class="settings-header">
+          <h3>📄 API上下文</h3>
+          <button class="btn-close" @click="showContextDialog = false">×</button>
+        </div>
+        <div class="context-body">
+          <pre class="context-content">{{ fullContextText }}</pre>
+        </div>
+        <div class="settings-footer">
+          <button class="btn" @click="copyContext">复制</button>
+          <button class="btn btn-primary" @click="showContextDialog = false">关闭</button>
+        </div>
+      </div>
+    </div>
+  </teleport>
 </template>
 
 <script setup>
@@ -317,6 +353,7 @@ const showRaw = ref(false)
 
 // 设置相关
 const showSettings = ref(false)
+const showContextDialog = ref(false)
 const chatSettings = ref({
   model: 'default',
   fontSize: '14px',
@@ -324,6 +361,47 @@ const chatSettings = ref({
 })
 const closeSettings = () => {
   showSettings.value = false
+}
+
+// 上下文文本
+const fullContextText = computed(() => {
+  const systemPrompt = `你是L1种子层的创作引导助手。你的任务是通过对话帮助用户梳理小说创意。
+
+对话策略：
+1. 每次只问一个问题，逐步引导
+2. 根据用户回答，自然地追问下一个要素
+3. 当收集到足够信息时，可以主动总结
+4. 保持友好、专业的语气
+
+需要收集的要素（按优先级）：
+- 类型/题材（重生/玄幻/科幻等）
+- 主角人设
+- 金手指/核心能力
+- 核心爽点
+- 世界观背景
+- 风格基调
+- 粗略大纲
+
+当前对话阶段：根据已有信息判断下一步该问什么。`
+  
+  let text = `=== SYSTEM PROMPT ===\n${systemPrompt}\n\n`
+  text += `=== MESSAGES ===\n\n`
+  
+  for (const msg of chatMessages.value) {
+    const role = msg.role === 'ai' ? 'ASSISTANT' : 'USER'
+    text += `--- ${role} ---\n${msg.content}\n\n`
+  }
+  
+  return text
+})
+
+const copyContext = async () => {
+  try {
+    await navigator.clipboard.writeText(fullContextText.value)
+    alert('已复制到剪贴板')
+  } catch (err) {
+    console.error('Copy failed:', err)
+  }
 }
 
 // 分屏宽度
@@ -344,6 +422,7 @@ const chatContainer = ref(null)
 const inputTextarea = ref(null)
 const isDragOver = ref(false)
 const enterKeyBehavior = ref('newline')
+const inputAttachments = ref([])
 
 const loadUiConfig = () => {
   const saved = localStorage.getItem('uiConfig')
@@ -408,11 +487,26 @@ const onDrop = async (event) => {
       content = JSON.stringify(content, null, 2)
     }
     
-    const newContent = `【${doc.name}】\n${content}`
-    userInput.value = userInput.value ? userInput.value + '\n\n' + newContent : newContent
+    inputAttachments.value.push({
+      id: Date.now(),
+      name: doc.name,
+      content: content,
+      expanded: false
+    })
   } catch (err) {
     console.error('Failed to load dropped document:', err)
   }
+}
+
+const toggleAttachment = (id) => {
+  const att = inputAttachments.value.find(a => a.id === id)
+  if (att) {
+    att.expanded = !att.expanded
+  }
+}
+
+const removeAttachment = (id) => {
+  inputAttachments.value = inputAttachments.value.filter(a => a.id !== id)
 }
 
 const inputPlaceholder = computed(() => {
@@ -514,17 +608,32 @@ const adjustTextareaHeight = () => {
 }
 
 const sendMessage = async () => {
-  if (!userInput.value.trim() || aiTyping.value) return
+  if ((!userInput.value.trim() && inputAttachments.value.length === 0) || aiTyping.value) return
+  
+  // 构建发送给API的完整内容
+  let messageContent = userInput.value
+  
+  // 添加附件内容
+  if (inputAttachments.value.length > 0) {
+    const attachmentParts = inputAttachments.value.map(att => {
+      return `【${att.name}】\n${att.content}`
+    })
+    if (messageContent.trim()) {
+      messageContent = attachmentParts.join('\n\n') + '\n\n' + messageContent
+    } else {
+      messageContent = attachmentParts.join('\n\n')
+    }
+  }
   
   // 添加用户消息
   chatMessages.value.push({
     role: 'user',
-    content: userInput.value,
+    content: messageContent,
     time: new Date()
   })
   
-  const userText = userInput.value
   userInput.value = ''
+  inputAttachments.value = []
   
   // 重置输入框高度
   if (inputTextarea.value) {
@@ -1443,6 +1552,76 @@ onMounted(() => {
   background: #e3f2fd;
 }
 
+.input-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: #f5f5f5;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.attachment-tag {
+  display: flex;
+  flex-direction: column;
+  background: #e3f2fd;
+  border: 1px solid #90caf9;
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  max-width: 200px;
+}
+
+.attachment-tag.expanded {
+  max-width: 100%;
+  width: 100%;
+}
+
+.att-name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.att-name span {
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.att-remove {
+  background: none;
+  border: none;
+  color: #999;
+  cursor: pointer;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1;
+  margin-left: 0.5rem;
+}
+
+.att-remove:hover {
+  color: #e74c3c;
+}
+
+.attachment-content {
+  margin-top: 0.5rem;
+  width: 100%;
+}
+
+.att-edit {
+  width: 100%;
+  min-height: 100px;
+  max-height: 200px;
+  padding: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.75rem;
+  resize: vertical;
+}
+
 /* 标签按钮 */
 .tab-btn {
   padding: 0.5rem 1rem;
@@ -1867,6 +2046,37 @@ onMounted(() => {
   border-top: 1px solid #e8e8e8;
   display: flex;
   justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.context-panel {
+  background: white;
+  border-radius: 8px;
+  width: 800px;
+  max-width: 95vw;
+  max-height: 90vh;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+  display: flex;
+  flex-direction: column;
+}
+
+.context-body {
+  flex: 1;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.context-content {
+  background: #f8f9fa;
+  padding: 1rem;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.875rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  max-height: 60vh;
+  overflow: auto;
 }
 
 /* 响应式 */
