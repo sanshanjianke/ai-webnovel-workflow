@@ -225,11 +225,18 @@
               <button class="btn btn-small" @click="toggleRawView">
                 {{ showRaw ? '结构化' : '原文' }}
               </button>
-              <button v-if="showRaw" class="btn btn-small" @click="saveVisionEdit">保存</button>
-              <button class="btn btn-small btn-primary" @click="downloadVision">
+              <button v-if="showRaw" class="btn btn-small" @click="applyAsVision">应用</button>
+              <button v-if="showRaw" class="btn btn-small btn-primary" @click="saveVisionEdit">
+                保存到文档库
+              </button>
+              <button v-if="!showRaw" class="btn btn-small btn-primary" @click="downloadVision">
                 下载
               </button>
             </div>
+          </div>
+          
+          <div v-if="showRaw && hasUnsavedChanges" class="unsaved-banner">
+            ⚠️ 未保存的更改
           </div>
           
           <div 
@@ -602,6 +609,10 @@ const vision = ref(null)
 const loading = ref(false)
 const editableVisionDocument = ref('')  // 可编辑的原文
 const isVisionDragOver = ref(false)
+const lastSavedContent = ref('')  // 上次保存的内容
+const hasUnsavedChanges = computed(() => {
+  return editableVisionDocument.value !== lastSavedContent.value
+})
 
 // 愿景文档拖放
 const onVisionDragOver = (event) => {
@@ -674,12 +685,64 @@ const saveVisionEdit = async () => {
       visionData = { content: editableVisionDocument.value }
     }
     
-    // 使用POST创建/覆盖
-    await axios.post(`/api/projects/${projectId.value}/l1/vision`, visionData)
-    vision.value = visionData
+    // 保存到文档库
+    const timestamp = new Date().toISOString().slice(0, 16).replace('T', ' ')
+    const name = `L1 愿景 — ${timestamp}`
+    
+    await fetch(`/api/projects/${projectId.value}/library`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: name,
+        layer: 'l1',
+        source: 'manual',
+        content: visionData
+      })
+    })
+    
+    // 刷新文档库
+    window.dispatchEvent(new CustomEvent('library-refresh'))
   } catch (err) {
     console.error('Failed to save vision:', err)
     alert('保存失败')
+  }
+}
+
+const applyAsVision = async () => {
+  if (!projectId.value) return
+  
+  try {
+    // 尝试解析为JSON
+    let visionData
+    try {
+      visionData = JSON.parse(editableVisionDocument.value)
+    } catch {
+      // 不是JSON，创建一个简单结构
+      visionData = { content: editableVisionDocument.value }
+    }
+    
+    // 应用为当前愿景文档
+    await axios.post(`/api/projects/${projectId.value}/l1/vision`, visionData)
+    vision.value = visionData
+    
+    // 更新保存状态
+    lastSavedContent.value = editableVisionDocument.value
+    
+    // 更新表单
+    if (visionData.idea !== undefined) form.value.idea = visionData.idea || ''
+    if (visionData.genre !== undefined) form.value.genre = visionData.genre || ''
+    if (visionData.target_readers !== undefined) form.value.target_readers = visionData.target_readers || ''
+    if (visionData.core_appeal !== undefined) form.value.core_appeal = visionData.core_appeal || ''
+    if (visionData.style !== undefined) form.value.style = visionData.style || ''
+    if (visionData.rough_outline !== undefined) form.value.rough_outline = visionData.rough_outline || ''
+    if (visionData.world_setting !== undefined) form.value.world_setting = visionData.world_setting || ''
+    if (visionData.protagonist !== undefined) form.value.protagonist = visionData.protagonist || ''
+    if (visionData.golden_finger !== undefined) form.value.golden_finger = visionData.golden_finger || ''
+    if (visionData.hot_elements !== undefined) form.value.hot_elements = visionData.hot_elements || ''
+    if (visionData.expected_length !== undefined) form.value.expected_length = visionData.expected_length || ''
+  } catch (err) {
+    console.error('Failed to apply vision:', err)
+    alert('应用失败')
   }
 }
 
@@ -734,12 +797,22 @@ ${v.expected_length || '未设置'}
 `
 })
 
-// 监听格式化文档变化，同步到可编辑文本
+// 监听格式化文档变化，仅在非编辑状态时同步
 watch(formattedVisionDocument, (newDoc) => {
-  if (newDoc) {
+  if (newDoc && !showRaw.value) {
+    // 只在结构化视图时同步
     editableVisionDocument.value = newDoc
+    lastSavedContent.value = newDoc
   }
 }, { immediate: true })
+
+// 切换到原文模式时同步一次
+watch(showRaw, (isRaw) => {
+  if (isRaw && formattedVisionDocument.value) {
+    editableVisionDocument.value = formattedVisionDocument.value
+    lastSavedContent.value = formattedVisionDocument.value
+  }
+})
 
 // 方法
 const adjustTextareaHeight = () => {
@@ -1896,6 +1969,17 @@ onMounted(() => {
 .preview-actions {
   display: flex;
   gap: 0.5rem;
+}
+
+.unsaved-banner {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  color: #856404;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+  text-align: center;
 }
 
 .preview-body {
