@@ -10,6 +10,7 @@
           <router-link :to="navLink('/l2')">L2</router-link>
           <router-link :to="navLink('/l3')">L3</router-link>
           <router-link :to="navLink('/l4')">L4</router-link>
+          <router-link :to="navLink('/library')">文档库</router-link>
           <router-link to="/settings">设置</router-link>
         </div>
       </div>
@@ -21,7 +22,18 @@
       </div>
     </nav>
     <main class="main-content">
-      <router-view></router-view>
+      <div class="content-wrapper">
+        <DocumentSidebar 
+          v-if="showSidebar && currentProjectId"
+          :projectId="currentProjectId"
+          ref="sidebarRef"
+          @document-selected="onDocumentSelected"
+          @document-opened="onDocumentOpened"
+        />
+        <div class="page-content">
+          <router-view></router-view>
+        </div>
+      </div>
     </main>
   </div>
 </template>
@@ -29,11 +41,18 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
+import DocumentSidebar from './components/library/DocumentSidebar.vue'
 
 const route = useRoute()
 const scale = ref(1)
+const sidebarRef = ref(null)
 
 const currentProjectId = computed(() => route.query.projectId)
+
+const showSidebar = computed(() => {
+  const path = route.path
+  return path !== '/' && path !== '/settings' && currentProjectId.value
+})
 
 const navLink = (path) => {
   if (currentProjectId.value) {
@@ -48,6 +67,7 @@ const pageTitle = computed(() => {
     '/l2': 'L2 架构层',
     '/l3': 'L3 叙事层',
     '/l4': 'L4 渲染层',
+    '/library': '文档库',
     '/settings': '系统设置'
   }
   return titles[route.path] || ''
@@ -66,6 +86,14 @@ const appStyle = computed(() => ({
   top: 0,
   left: 0
 }))
+
+const onDocumentSelected = (doc) => {
+  console.log('Document selected:', doc)
+}
+
+const onDocumentOpened = (doc) => {
+  console.log('Document opened:', doc)
+}
 </script>
 
 <style>
@@ -210,6 +238,19 @@ html, body {
   overflow: hidden;
   padding: 0;
   margin: 0;
+}
+
+.content-wrapper {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.page-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .btn {

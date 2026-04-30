@@ -9,6 +9,7 @@ import L3Narrative from './pages/L3Narrative.vue'
 import L4Render from './pages/L4Render.vue'
 import WorldBook from './pages/WorldBook.vue'
 import Settings from './pages/Settings.vue'
+import Library from './pages/Library.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
@@ -17,6 +18,7 @@ const routes = [
   { path: '/l3', component: L3Narrative },
   { path: '/l4', component: L4Render },
   { path: '/worldbook', component: WorldBook },
+  { path: '/library', component: Library },
   { path: '/settings', component: Settings }
 ]
 

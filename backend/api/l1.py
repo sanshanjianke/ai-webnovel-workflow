@@ -179,3 +179,76 @@ async def l1_chat(project_id: str, req: L1ChatRequest):
         extracted["idea"] = last_user_msg
     
     return L1ChatResponse(reply=response, extracted=extracted)
+
+
+@router.get("/projects/{project_id}/l1/draft")
+async def get_draft(project_id: str):
+    pm = get_project_manager()
+    project = pm.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    draft_path = project.project_path / "outputs" / "l1_draft.json"
+    if not draft_path.exists():
+        return {"draft": None}
+    
+    with open(draft_path, "r", encoding="utf-8") as f:
+        draft_data = json.load(f)
+    
+    return {"draft": draft_data}
+
+
+@router.post("/projects/{project_id}/l1/draft")
+async def save_draft(project_id: str, data: dict):
+    pm = get_project_manager()
+    project = pm.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    draft_path = project.project_path / "outputs" / "l1_draft.json"
+    draft_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    data["updated_at"] = datetime.now().isoformat()
+    
+    with open(draft_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    
+    return {"status": "saved"}
+
+
+@router.get("/projects/{project_id}/l1/chat-history")
+async def get_chat_history(project_id: str):
+    pm = get_project_manager()
+    project = pm.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    history_path = project.project_path / "outputs" / "l1_chat_history.json"
+    if not history_path.exists():
+        return {"messages": []}
+    
+    with open(history_path, "r", encoding="utf-8") as f:
+        history_data = json.load(f)
+    
+    return {"messages": history_data.get("messages", [])}
+
+
+@router.post("/projects/{project_id}/l1/chat-history")
+async def save_chat_history(project_id: str, data: dict):
+    pm = get_project_manager()
+    project = pm.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    history_path = project.project_path / "outputs" / "l1_chat_history.json"
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    history_data = {
+        "messages": data.get("messages", []),
+        "updated_at": datetime.now().isoformat()
+    }
+    
+    with open(history_path, "w", encoding="utf-8") as f:
+        json.dump(history_data, f, ensure_ascii=False, indent=2)
+    
+    return {"status": "saved"}
