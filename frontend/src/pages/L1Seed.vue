@@ -92,28 +92,13 @@
         </div>
         
         <div class="chat-input-area">
-          <div v-if="inputAttachments.length > 0" class="input-attachments">
-            <div 
-              v-for="att in inputAttachments" 
-              :key="att.id" 
-              class="attachment-tag"
-              :class="{ expanded: att.expanded }"
-            >
-              <div class="att-name">
-                <span @dblclick="toggleAttachment(att.id)">📄 {{ att.name }}</span>
-                <button class="att-remove" @click="removeAttachment(att.id)">×</button>
-              </div>
-              <div v-if="att.expanded" class="attachment-content">
-                <textarea v-model="att.content" class="att-edit"></textarea>
-              </div>
-            </div>
-          </div>
           <textarea 
             ref="inputTextarea"
             v-model="userInput" 
             :placeholder="inputPlaceholder"
             @keydown.enter="handleEnterKey"
             @input="adjustTextareaHeight"
+            @dblclick="handleTextareaDblClick"
             @dragover.prevent="onDragOver"
             @dragleave="onDragLeave"
             @drop.prevent="onDrop"
@@ -123,7 +108,7 @@
           <button 
             class="btn btn-primary" 
             @click="sendMessage"
-            :disabled="(!userInput.trim() && inputAttachments.length === 0) || aiTyping"
+            :disabled="!userInput.trim() || aiTyping"
           >
             发送
           </button>
@@ -474,9 +459,42 @@ const onDrop = async (event) => {
   
   try {
     const doc = JSON.parse(docInfo)
-    const projectId = route.query.projectId
     
-    const res = await fetch(`/api/projects/${projectId}/library/${doc.uid}`)
+    // 在输入框中插入标签占位符
+    const tag = `[${doc.name}]`
+    const textarea = inputTextarea.value
+    const cursorPos = textarea?.selectionStart || userInput.value.length
+    const textBefore = userInput.value.substring(0, cursorPos)
+    const textAfter = userInput.value.substring(cursorPos)
+    userInput.value = textBefore + tag + textAfter
+    
+    // 存储附件信息
+    inputAttachments.value.push({
+      id: doc.uid,
+      name: doc.name,
+      content: null,  // 延迟加载
+      tag: tag
+    })
+  } catch (err) {
+    console.error('Failed to load dropped document:', err)
+  }
+}
+
+const expandAttachment = async (tag) => {
+  const att = inputAttachments.value.find(a => a.tag === tag)
+  if (!att) return
+  
+  // 如果已加载，直接展开
+  if (att.content !== null) {
+    userInput.value = userInput.value.replace(att.tag, att.content)
+    inputAttachments.value = inputAttachments.value.filter(a => a.tag !== tag)
+    return
+  }
+  
+  // 加载内容
+  try {
+    const projectId = route.query.projectId
+    const res = await fetch(`/api/projects/${projectId}/library/${att.id}`)
     const data = await res.json()
     
     let content = data.content
@@ -487,33 +505,43 @@ const onDrop = async (event) => {
       content = JSON.stringify(content, null, 2)
     }
     
-    inputAttachments.value.push({
-      id: Date.now(),
-      name: doc.name,
-      content: content,
-      expanded: false
-    })
+    // 展开内容
+    userInput.value = userInput.value.replace(att.tag, content)
+    inputAttachments.value = inputAttachments.value.filter(a => a.tag !== tag)
   } catch (err) {
-    console.error('Failed to load dropped document:', err)
+    console.error('Failed to load document:', err)
   }
 }
 
-const toggleAttachment = (id) => {
-  const att = inputAttachments.value.find(a => a.id === id)
-  if (att) {
-    att.expanded = !att.expanded
+const handleTextareaDblClick = (event) => {
+  const textarea = inputTextarea.value
+  const cursorPos = textarea?.selectionStart || 0
+  const text = userInput.value
+  
+  // 查找光标所在的 [xxx] 标签
+  let start = text.lastIndexOf('[', cursorPos)
+  let end = text.indexOf(']', cursorPos)
+  
+  if (start === -1 || end === -1 || start > end) {
+    // 尝试从光标位置前后查找
+    start = text.lastIndexOf('[', cursorPos - 1)
+    end = text.indexOf(']', cursorPos)
   }
-}
-
-const removeAttachment = (id) => {
-  inputAttachments.value = inputAttachments.value.filter(a => a.id !== id)
+  
+  if (start !== -1 && end !== -1 && start < end) {
+    const tag = text.substring(start, end + 1)
+    const att = inputAttachments.value.find(a => a.tag === tag)
+    if (att) {
+      expandAttachment(tag)
+    }
+  }
 }
 
 const inputPlaceholder = computed(() => {
   if (enterKeyBehavior.value === 'newline') {
-    return '输入你的想法... (Enter换行，Shift+Enter发送，可拖入文档)'
+    return '输入你的想法... (Enter换行，Shift+Enter发送，可拖入文档生成[文件名]标签)'
   } else {
-    return '输入你的想法... (Enter发送，Shift+Enter换行，可拖入文档)'
+    return '输入你的想法... (Enter发送，Shift+Enter换行，可拖入文档生成[文件名]标签)'
   }
 })
 
@@ -608,22 +636,38 @@ const adjustTextareaHeight = () => {
 }
 
 const sendMessage = async () => {
-  if ((!userInput.value.trim() && inputAttachments.value.length === 0) || aiTyping.value) return
+  if (!userInput.value.trim() || aiTyping.value) return
   
-  // 构建发送给API的完整内容
+  // 展开所有未展开的附件标签
   let messageContent = userInput.value
-  
-  // 添加附件内容
-  if (inputAttachments.value.length > 0) {
-    const attachmentParts = inputAttachments.value.map(att => {
-      return `【${att.name}】\n${att.content}`
-    })
-    if (messageContent.trim()) {
-      messageContent = attachmentParts.join('\n\n') + '\n\n' + messageContent
-    } else {
-      messageContent = attachmentParts.join('\n\n')
+  for (const att of inputAttachments.value) {
+    if (messageContent.includes(att.tag)) {
+      // 如果还没加载内容，加载它
+      if (att.content === null) {
+        try {
+          const projectId = route.query.projectId
+          const res = await fetch(`/api/projects/${projectId}/library/${att.id}`)
+          const data = await res.json()
+          
+          let content = data.content
+          if (typeof content === 'object' && content.content) {
+            content = content.content
+          }
+          if (typeof content !== 'string') {
+            content = JSON.stringify(content, null, 2)
+          }
+          att.content = content
+        } catch (err) {
+          console.error('Failed to load document:', err)
+          att.content = `[加载失败: ${att.name}]`
+        }
+      }
+      messageContent = messageContent.replace(att.tag, att.content)
     }
   }
+  
+  // 清空附件列表
+  inputAttachments.value = []
   
   // 添加用户消息
   chatMessages.value.push({
@@ -633,7 +677,6 @@ const sendMessage = async () => {
   })
   
   userInput.value = ''
-  inputAttachments.value = []
   
   // 重置输入框高度
   if (inputTextarea.value) {
@@ -1550,76 +1593,6 @@ onMounted(() => {
 .chat-input-area textarea.drag-over {
   border-color: #3498db;
   background: #e3f2fd;
-}
-
-.input-attachments {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  padding: 0.5rem;
-  background: #f5f5f5;
-  border-bottom: 1px solid #e8e8e8;
-}
-
-.attachment-tag {
-  display: flex;
-  flex-direction: column;
-  background: #e3f2fd;
-  border: 1px solid #90caf9;
-  border-radius: 4px;
-  padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
-  max-width: 200px;
-}
-
-.attachment-tag.expanded {
-  max-width: 100%;
-  width: 100%;
-}
-
-.att-name {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.att-name span {
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.att-remove {
-  background: none;
-  border: none;
-  color: #999;
-  cursor: pointer;
-  padding: 0;
-  font-size: 1rem;
-  line-height: 1;
-  margin-left: 0.5rem;
-}
-
-.att-remove:hover {
-  color: #e74c3c;
-}
-
-.attachment-content {
-  margin-top: 0.5rem;
-  width: 100%;
-}
-
-.att-edit {
-  width: 100%;
-  min-height: 100px;
-  max-height: 200px;
-  padding: 0.5rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  font-family: monospace;
-  font-size: 0.75rem;
-  resize: vertical;
 }
 
 /* 标签按钮 */
