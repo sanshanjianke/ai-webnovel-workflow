@@ -231,7 +231,7 @@ async def set_active_document(project_id: str, layer: str, data: SetActiveReques
 
 
 @router.post("/projects/{project_id}/library/import")
-async def import_file(project_id: str, file: UploadFile = File(...)):
+async def import_file(project_id: str, file: UploadFile = File(...), directory: str = "/"):
     pm = get_project_manager()
     project = pm.get_project(project_id)
     if not project:
@@ -256,6 +256,7 @@ async def import_file(project_id: str, file: UploadFile = File(...)):
         name=f"导入 — {filename}",
         content=parsed_content,
         format=format,
+        directory=directory,
     )
     
     return {"uid": uid, "entry": library.get_entry(uid).model_dump()}

@@ -1,5 +1,9 @@
 <template>
-  <div class="library-sidebar" :class="{ collapsed: isCollapsed }">
+  <div 
+    class="library-sidebar" 
+    :class="{ collapsed: isCollapsed }"
+    :style="{ width: isCollapsed ? '40px' : sidebarWidth + 'px' }"
+  >
     <div class="sidebar-header">
       <span v-if="!isCollapsed" class="sidebar-title">文档库</span>
       <button class="btn-toggle" @click="toggleCollapse">
@@ -23,66 +27,54 @@
       
       <div v-if="loading" class="loading">加载中...</div>
       
-      <div v-else class="document-tree">
-        <div class="directory-item">
-          <div 
-            class="directory-header"
-            @click="toggleDirectory('/')"
-            @contextmenu.prevent="showDirContext($event, '/')"
-          >
-            <span class="dir-icon">{{ expandedDirs.has('/') ? '📂' : '📁' }}</span>
-            <span class="dir-name">根目录</span>
-          </div>
-          <div v-show="expandedDirs.has('/')" class="directory-children">
-            <template v-for="item in getTreeItems('/')" :key="item.path || item.uid">
-              <div v-if="item.type === 'dir'" class="directory-item nested">
-                <div 
-                  class="directory-header"
-                  @click="toggleDirectory(item.path)"
-                  @contextmenu.prevent="showDirContext($event, item.path)"
-                >
-                  <span class="dir-icon">{{ expandedDirs.has(item.path) ? '📂' : '📁' }}</span>
-                  <span class="dir-name">{{ item.name }}</span>
-                </div>
-                <div v-show="expandedDirs.has(item.path)" class="directory-children">
-                  <div
-                    v-for="doc in getDocsInDir(item.path)"
-                    :key="doc.uid"
-                    class="document-item"
-                    :class="{ 
-                      active: activeDocUid === doc.uid,
-                      archived: doc.status === 'archived',
-                      draft: doc.status === 'draft'
-                    }"
-                    @click="selectDocument(doc)"
-                    @dblclick="openDocument(doc)"
-                    @contextmenu.prevent="showDocContext($event, doc)"
-                  >
-                    <span class="doc-icon">{{ getDocIcon(doc.layer) }}</span>
-                    <span class="doc-name">{{ doc.name }}</span>
-                    <span v-if="isActiveForLayer(doc)" class="active-badge">●</span>
-                  </div>
-                </div>
-              </div>
+      <div v-else class="document-tree" @contextmenu.prevent="showDirContext($event, '/')">
+        <template v-for="item in getTreeItems('/')" :key="item.path || item.uid">
+          <div v-if="item.type === 'dir'" class="directory-item">
+            <div 
+              class="directory-header"
+              @click="toggleDirectory(item.path)"
+              @contextmenu.prevent.stop="showDirContext($event, item.path)"
+            >
+              <span class="dir-icon">{{ expandedDirs.has(item.path) ? '📂' : '📁' }}</span>
+              <span class="dir-name">{{ item.name }}</span>
+            </div>
+            <div v-show="expandedDirs.has(item.path)" class="directory-children">
               <div
-                v-else
+                v-for="doc in getDocsInDir(item.path)"
+                :key="doc.uid"
                 class="document-item"
                 :class="{ 
-                  active: activeDocUid === item.uid,
-                  archived: item.status === 'archived',
-                  draft: item.status === 'draft'
+                  active: activeDocUid === doc.uid,
+                  archived: doc.status === 'archived',
+                  draft: doc.status === 'draft'
                 }"
-                @click="selectDocument(item)"
-                @dblclick="openDocument(item)"
-                @contextmenu.prevent="showDocContext($event, item)"
+                @click="selectDocument(doc)"
+                @dblclick="openDocument(doc)"
+                @contextmenu.prevent="showDocContext($event, doc)"
               >
-                <span class="doc-icon">{{ getDocIcon(item.layer) }}</span>
-                <span class="doc-name">{{ item.name }}</span>
-                <span v-if="isActiveForLayer(item)" class="active-badge">●</span>
+                <span class="doc-icon">{{ getDocIcon(doc.layer) }}</span>
+                <span class="doc-name">{{ doc.name }}</span>
+                <span v-if="isActiveForLayer(doc)" class="active-badge">●</span>
               </div>
-            </template>
+            </div>
           </div>
-        </div>
+          <div
+            v-else
+            class="document-item"
+            :class="{ 
+              active: activeDocUid === item.uid,
+              archived: item.status === 'archived',
+              draft: item.status === 'draft'
+            }"
+            @click="selectDocument(item)"
+            @dblclick="openDocument(item)"
+            @contextmenu.prevent="showDocContext($event, item)"
+          >
+            <span class="doc-icon">{{ getDocIcon(item.layer) }}</span>
+            <span class="doc-name">{{ item.name }}</span>
+            <span v-if="isActiveForLayer(item)" class="active-badge">●</span>
+          </div>
+        </template>
       </div>
       
       <div class="sidebar-footer">
@@ -106,6 +98,7 @@
       </div>
       <div v-else-if="contextMenu.type === 'dir'" class="menu-items">
         <div @click="createDocInDir">新建文档</div>
+        <div @click="importToDir">导入文件</div>
         <div @click="createSubDirectory">新建子目录</div>
         <div v-if="contextMenu.item !== '/'" class="menu-danger" @click="removeDirectory">删除目录</div>
       </div>
@@ -159,6 +152,12 @@
         </div>
       </div>
     </div>
+    
+    <div 
+      v-if="!isCollapsed"
+      class="resize-handle"
+      @mousedown="startResize"
+    ></div>
   </div>
 </template>
 
@@ -186,6 +185,9 @@ const activeDocs = ref({})
 const expandedDirs = ref(new Set(['/']))
 const activeDocUid = ref(null)
 const fileInput = ref(null)
+const importDirectory = ref('/')
+const sidebarWidth = ref(280)
+const isResizing = ref(false)
 
 const contextMenu = ref({
   show: false,
@@ -584,6 +586,13 @@ const removeDirectory = async () => {
 }
 
 const triggerImport = () => {
+  importDirectory.value = '/'
+  fileInput.value?.click()
+}
+
+const importToDir = () => {
+  importDirectory.value = contextMenu.value.item || '/'
+  hideContextMenu()
   fileInput.value?.click()
 }
 
@@ -595,7 +604,7 @@ const handleImport = async (event) => {
   formData.append('file', file)
   
   try {
-    await fetch(`${apiBase.value}/import`, {
+    await fetch(`${apiBase.value}/import?directory=${encodeURIComponent(importDirectory.value)}`, {
       method: 'POST',
       body: formData
     })
@@ -628,6 +637,27 @@ const refresh = async () => {
   }
 }
 
+const startResize = (e) => {
+  isResizing.value = true
+  document.addEventListener('mousemove', handleResize)
+  document.addEventListener('mouseup', stopResize)
+  e.preventDefault()
+}
+
+const handleResize = (e) => {
+  if (!isResizing.value) return
+  const newWidth = e.clientX
+  if (newWidth >= 200 && newWidth <= 600) {
+    sidebarWidth.value = newWidth
+  }
+}
+
+const stopResize = () => {
+  isResizing.value = false
+  document.removeEventListener('mousemove', handleResize)
+  document.removeEventListener('mouseup', stopResize)
+}
+
 onMounted(() => {
   refresh()
   document.addEventListener('click', hideContextMenu)
@@ -637,6 +667,7 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('click', hideContextMenu)
   window.removeEventListener('library-refresh', refresh)
+  stopResize()
 })
 
 defineExpose({ refresh })
@@ -644,17 +675,36 @@ defineExpose({ refresh })
 
 <style scoped>
 .library-sidebar {
-  width: 280px;
+  position: relative;
+  min-width: 200px;
+  max-width: 600px;
   background: #fff;
   border-right: 1px solid #e0e0e0;
   display: flex;
   flex-direction: column;
-  transition: width 0.2s;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .library-sidebar.collapsed {
-  width: 32px;
+  min-width: 32px;
+  max-width: 32px;
+}
+
+.resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.2s;
+  z-index: 10;
+}
+
+.resize-handle:hover {
+  background: #3498db;
 }
 
 .sidebar-header {
