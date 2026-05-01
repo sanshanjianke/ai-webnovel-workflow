@@ -1,32 +1,27 @@
+"""
+L2 compatibility layer — forwards to unified meeting API.
+All old L2 endpoints are preserved and internally delegate to the MeetingEngine.
+"""
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel
-from typing import Optional
 import json
 from datetime import datetime
 import asyncio
 
 from backend.services.project_manager import get_project_manager
 from backend.services.meeting_logger import MeetingLogger
-from backend.modules.worldbook.st_style import STStyleWorldBook
-from backend.modules.l2.expert_meeting import ExpertMeetingL2
-from backend.core.config import get_config
-from backend.core.registry import get_module, discover_modules
+from backend.core.registry import discover_modules
+from backend.core.protocols.meeting import MeetingConfig, ExpertConfig, ExpertRole, Granularity
+from backend.modules.orchestration import MeetingEngine
 
 router = APIRouter()
-
-
-class L2StartRequest(BaseModel):
-    collaboration_mode: str = "semi_auto"
-    max_rounds: int = 3
+_pending_feedback: dict[str, asyncio.Queue] = {}
 
 
 class L2Decision(BaseModel):
     action: str
     message: str = ""
-
-
-_pending_feedback = {}
 
 
 def sse_format(event_type: str, data: dict) -> str:
@@ -35,41 +30,60 @@ def sse_format(event_type: str, data: dict) -> str:
 
 @router.get("/projects/{project_id}/l2/stream")
 async def l2_stream(project_id: str, collaboration_mode: str = "semi_auto"):
+    """Legacy L2 endpoint — internally uses unified MeetingEngine"""
     discover_modules()
-    
+
     pm = get_project_manager()
     project = pm.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    
+
     vision_path = project.project_path / "outputs" / "l1_vision.json"
     if not vision_path.exists():
         raise HTTPException(status_code=404, detail="Vision not found, please run L1 first")
-    
+
     with open(vision_path, "r", encoding="utf-8") as f:
         vision = json.load(f)
-    
-    config = get_config()
-    protocol_id = config.pipeline.l2.meeting_protocol
-    
-    world_book = STStyleWorldBook(project.project_path)
-    logger = MeetingLogger(project.project_path / "logs" / "meeting.db")
-    
-    meeting = ExpertMeetingL2(
-        protocol_id=protocol_id,
+
+    config = MeetingConfig(
+        meeting_name="章纲设计 (Legacy L2)",
+        granularity=Granularity.CHAPTER,
+        experts=[
+            ExpertConfig(expert_id="plot_architect_v1", role=ExpertRole.MAIN),
+            ExpertConfig(expert_id="web_editor_v1", role=ExpertRole.REVIEW),
+            ExpertConfig(expert_id="character_designer_v1", role=ExpertRole.SUPPLEMENT),
+        ],
         collaboration_mode=collaboration_mode,
-        max_rounds=config.pipeline.l2.max_rounds
+        max_rounds=3
     )
-    
+
+    logger = MeetingLogger(project.project_path / "logs" / "meeting.db")
+    engine = MeetingEngine(config)
+
+    worldbook_text = "暂无世界书"
+    worldbook_path = project.project_path / "worldbook.json"
+    if worldbook_path.exists():
+        try:
+            with open(worldbook_path, "r", encoding="utf-8") as f:
+                wb_data = json.load(f)
+                entries = wb_data.get("entries", [])
+                if entries:
+                    worldbook_text = "\n".join([
+                        f"- {e.get('keys', [''])[0]}: {e.get('content', '')[:100]}..."
+                        for e in entries[:10]
+                    ])
+        except Exception:
+            pass
+
     async def generate():
-        feedback_queue = asyncio.Queue()
+        feedback_queue: asyncio.Queue = asyncio.Queue()
         _pending_feedback[project_id] = feedback_queue
-        
+
         def human_feedback():
             return None
-        
+
         try:
-            for event in meeting.generate_outline(vision, world_book, human_feedback=human_feedback):
+            for event in engine.run(vision, worldbook_text, human_feedback=human_feedback):
                 if event["type"] == "expert_speak":
                     logger.log_meeting(
                         project_id=project_id,
@@ -77,58 +91,48 @@ async def l2_stream(project_id: str, collaboration_mode: str = "semi_auto"):
                         expert_type=event["expert_type"],
                         content=event["content"],
                         suggestions=event.get("suggestions", []),
-                        round=meeting._current_round
+                        round=engine.current_round
                     )
-                
+
                 yield sse_format(event["type"], event)
-                
+
                 if event["type"] == "waiting_user":
                     try:
-                        feedback = await asyncio.wait_for(
-                            feedback_queue.get(),
-                            timeout=300.0
-                        )
+                        feedback = await asyncio.wait_for(feedback_queue.get(), timeout=600.0)
                         yield sse_format("user_feedback", feedback)
                     except asyncio.TimeoutError:
-                        yield sse_format("timeout", {"message": "Waiting for user feedback timed out"})
+                        yield sse_format("timeout", {"message": "等待用户反馈超时"})
                         break
-                
-                if event["type"] == "outline_ready":
+
+                if event["type"] == "output_ready":
                     logger.log_version(
                         project_id=project_id,
                         layer="l2",
-                        content=event["outline"],
+                        content=event["output"],
                         message=f"L2 outline generated in {event['rounds']} rounds"
                     )
-                    
+
                     outline_path = project.project_path / "outputs" / "l2_outline.json"
                     with open(outline_path, "w", encoding="utf-8") as f:
-                        json.dump(event["outline"], f, ensure_ascii=False, indent=2)
-                    
+                        json.dump(event["output"], f, ensure_ascii=False, indent=2)
+
                     yield sse_format("done", {"message": "Meeting completed"})
-        
         finally:
-            if project_id in _pending_feedback:
-                del _pending_feedback[project_id]
-    
+            _pending_feedback.pop(project_id, None)
+
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        }
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
     )
 
 
 @router.post("/projects/{project_id}/l2/feedback")
 async def l2_feedback(project_id: str, data: L2Decision):
-    if project_id not in _pending_feedback:
+    queue = _pending_feedback.get(project_id)
+    if queue is None:
         raise HTTPException(status_code=404, detail="No active meeting for this project")
-    
-    queue = _pending_feedback[project_id]
     await queue.put(data.model_dump())
-    
     return {"status": "feedback_received"}
 
 
@@ -138,15 +142,13 @@ async def get_outline(project_id: str):
     project = pm.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    
+
     outline_path = project.project_path / "outputs" / "l2_outline.json"
     if not outline_path.exists():
         raise HTTPException(status_code=404, detail="Outline not found")
-    
+
     with open(outline_path, "r", encoding="utf-8") as f:
-        outline = json.load(f)
-    
-    return {"outline": outline}
+        return {"outline": json.load(f)}
 
 
 @router.put("/projects/{project_id}/l2/outline")
@@ -155,18 +157,18 @@ async def update_outline(project_id: str, data: dict):
     project = pm.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    
+
     outline_path = project.project_path / "outputs" / "l2_outline.json"
     if not outline_path.exists():
         raise HTTPException(status_code=404, detail="Outline not found")
-    
+
     with open(outline_path, "r", encoding="utf-8") as f:
         outline = json.load(f)
-    
+
     outline.update(data)
     outline["updated_at"] = datetime.now().isoformat()
-    
+
     with open(outline_path, "w", encoding="utf-8") as f:
         json.dump(outline, f, ensure_ascii=False, indent=2)
-    
+
     return {"status": "updated", "outline": outline}

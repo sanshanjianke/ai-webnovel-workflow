@@ -7,7 +7,7 @@
         <div class="nav-layers">
           <router-link to="/">仪表盘</router-link>
           <router-link :to="navLink('/l1')">L1</router-link>
-          <router-link :to="navLink('/l2')">L2</router-link>
+          <router-link :to="navLink('/orchestrate')">编排</router-link>
           <router-link :to="navLink('/l3')">L3</router-link>
           <router-link :to="navLink('/l4')">L4</router-link>
           <router-link :to="navLink('/library')">文档库</router-link>
@@ -64,7 +64,7 @@ const navLink = (path) => {
 const pageTitle = computed(() => {
   const titles = {
     '/l1': 'L1 种子层',
-    '/l2': 'L2 架构层',
+    '/orchestrate': '专家编排',
     '/l3': 'L3 叙事层',
     '/l4': 'L4 渲染层',
     '/library': '文档库',

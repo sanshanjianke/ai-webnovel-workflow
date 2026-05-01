@@ -15,12 +15,10 @@ MODULE_REGISTRY: dict[str, dict[str, type]] = {
     "rag": {},
     "worldbook": {},
     "l1": {},
-    "l1_5": {},
-    "l2": {},
-    "expert": {},
-    "meeting_protocol": {},
     "l3": {},
     "l4": {},
+    "expert": {},
+    "meeting_protocol": {},
 }
 
 
@@ -33,8 +31,8 @@ def _camel_to_snake(name: str) -> str:
 def register_module(category: str):
     def decorator(cls):
         key = _camel_to_snake(cls.__name__)
-        suffixes = ['_provider', '_agent', '_generator', '_architect', 
-                    '_editor', '_designer', '_renderer', '_narrative', 
+        suffixes = ['_provider', '_agent', '_generator', '_architect',
+                    '_editor', '_designer', '_renderer', '_narrative',
                     '_protocol', '_world_book', '_retriever']
         for suffix in suffixes:
             if key.endswith(suffix):
@@ -66,23 +64,37 @@ def discover_modules():
 
     backend_path = Path(__file__).parent.parent
 
-    for category in ["llm", "rag", "worldbook", "l1", "l1_5", "l2", "l3", "l4"]:
+    # LLM, RAG, Worldbook, L1, L3, L4
+    for category in ["llm", "rag", "worldbook", "l1", "l3", "l4"]:
         module_path = backend_path / "modules" / category
         if module_path.exists():
+            try:
+                importlib.import_module(f"backend.modules.{category}")
+            except Exception as e:
+                print(f"Warning: Failed to import {category}.__init__: {e}")
             for _, module_name, _ in pkgutil.iter_modules([str(module_path)]):
                 try:
                     importlib.import_module(f"backend.modules.{category}.{module_name}")
                 except Exception as e:
                     print(f"Warning: Failed to import {category}.{module_name}: {e}")
 
-    experts_path = backend_path / "modules" / "l2" / "experts"
+    # Unified experts
+    experts_path = backend_path / "modules" / "experts"
     if experts_path.exists():
-        for _, module_name, _ in pkgutil.iter_modules([str(experts_path)]):
-            try:
-                importlib.import_module(f"backend.modules.l2.experts.{module_name}")
-            except Exception as e:
-                print(f"Warning: Failed to import l2.experts.{module_name}: {e}")
+        try:
+            importlib.import_module("backend.modules.experts")
+        except Exception as e:
+            print(f"Warning: Failed to import experts: {e}")
 
+    # Orchestration engine
+    orch_path = backend_path / "modules" / "orchestration"
+    if orch_path.exists():
+        try:
+            importlib.import_module("backend.modules.orchestration")
+        except Exception as e:
+            print(f"Warning: Failed to import orchestration: {e}")
+
+    # Meeting protocols
     meeting_path = backend_path / "meeting_protocols"
     if meeting_path.exists():
         for _, module_name, _ in pkgutil.iter_modules([str(meeting_path)]):
@@ -90,3 +102,27 @@ def discover_modules():
                 importlib.import_module(f"backend.meeting_protocols.{module_name}")
             except Exception as e:
                 print(f"Warning: Failed to import meeting_protocols.{module_name}: {e}")
+
+    # Legacy: import old l2 experts and l1_5 for backward compat
+    _import_legacy_modules(backend_path)
+
+
+def _import_legacy_modules(backend_path):
+    """Import legacy modules for backward compatibility during migration"""
+    import importlib
+    import pkgutil
+
+    # Old l2 experts are consolidated into modules/experts/,
+    # but import to pick up any @register_module decorators that may remain
+    for legacy in ["l1_5"]:
+        module_path = backend_path / "modules" / legacy
+        if module_path.exists():
+            try:
+                importlib.import_module(f"backend.modules.{legacy}")
+            except Exception as e:
+                print(f"Warning: Failed to import legacy {legacy}: {e}")
+            for _, module_name, _ in pkgutil.iter_modules([str(module_path)]):
+                try:
+                    importlib.import_module(f"backend.modules.{legacy}.{module_name}")
+                except Exception as e:
+                    print(f"Warning: Failed to import legacy {legacy}.{module_name}: {e}")
