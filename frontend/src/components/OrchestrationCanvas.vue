@@ -10,18 +10,6 @@
       </button>
     </div>
 
-    <!-- 浮动工具栏 -->
-    <div class="toolbar">
-      <button class="toolbar-btn" @click="addGroupNode('container')" title="容器框（框选专家共享上下文）">📦</button>
-      <button class="toolbar-btn" @click="addGroupNode('loop')" title="循环结构（框内专家循环N次）">🔁</button>
-      <button class="toolbar-btn" @click="addPlaceholder('worldbook')" title="世界书节点（占位）">📖</button>
-      <button class="toolbar-btn" @click="addPlaceholder('rag')" title="RAG节点（占位）">🔍</button>
-      <button class="toolbar-btn" @click="addPlaceholder('splitter')" title="章节拆分师">✂️</button>
-      <span class="toolbar-sep"></span>
-      <button class="toolbar-btn" @click="saveDesign" :disabled="!projectId" title="保存">💾</button>
-      <button class="toolbar-btn" @click="loadDesign" :disabled="!projectId" title="加载">📂</button>
-    </div>
-
     <div class="canvas-layout">
       <!-- ── 左侧工具箱 ── -->
       <div class="toolbox">
@@ -73,6 +61,9 @@
       <div class="canvas-area" 
         @drop="onDrop" 
         @dragover="onDragOver"
+        @dragenter="onDragEnterCanvas"
+        @dragleave="onDragLeaveCanvas"
+        :class="{ 'drag-over-canvas': draggingOverCanvas }"
       >
         <VueFlow
           v-model:nodes="nodes"
@@ -81,6 +72,7 @@
           :default-viewport="{ x: 0, y: 0, zoom: 1 }"
           fit-view-on-init
           @node-click="onNodeClick"
+          @pane-click="selectedNode = null"
           @edge-click="onEdgeClick"
           @connect="onConnect"
           class="flow-canvas"
@@ -88,11 +80,27 @@
           <Background :gap="20" />
           <Controls position="bottom-right" />
         </VueFlow>
+        <div class="floating-toolbar">
+          <span class="toolbar-label">工具</span>
+          <span class="toolbar-sep"></span>
+          <button class="toolbar-btn" @click="addGroupNode('container')" title="容器框">📦</button>
+          <button class="toolbar-btn" @click="addGroupNode('loop')" title="循环结构">🔁</button>
+          <button class="toolbar-btn" @click="addPlaceholder('worldbook')" title="世界书节点">📖</button>
+          <button class="toolbar-btn" @click="addPlaceholder('rag')" title="RAG节点">🔍</button>
+          <button class="toolbar-btn" @click="addPlaceholder('splitter')" title="章节拆分师">✂️</button>
+          <span class="toolbar-sep"></span>
+          <button class="toolbar-btn" @click="saveDesign" :disabled="!projectId || saveStatus === 'saving'" :title="saveStatus === 'saved' ? '已保存' : saveStatus === 'error' ? '保存失败' : '保存到文档库'">
+            {{ saveStatus === 'saving' ? '⏳' : saveStatus === 'saved' ? '✅' : saveStatus === 'error' ? '❌' : '💾' }}
+          </button>
+        </div>
       </div>
 
       <!-- ── 右侧配置面板 ── -->
       <div class="config-panel" v-if="selectedNode">
-        <h4>节点配置</h4>
+        <div class="panel-header-row">
+          <h4>节点配置</h4>
+          <button class="btn-back" @click="selectedNode = null" title="返回会议配置">← 返回</button>
+        </div>
         <div class="config-field">
           <label>专家</label>
           <div class="expert-label-row">
@@ -178,10 +186,9 @@
         <button class="btn btn-primary btn-run" @click="runMeeting" :disabled="orderedNodes.length === 0">
           运行会议
         </button>
-        <div class="save-bar">
-          <button class="btn btn-outline btn-save" @click="saveDesign" :disabled="!projectId">保存设计</button>
-          <button class="btn btn-outline btn-save" @click="loadDesign" :disabled="!projectId">加载设计</button>
-        </div>
+        <button class="btn btn-outline btn-save" style="width:100%; margin-top:6px;" @click="saveDesign" :disabled="!projectId || saveStatus === 'saving'">
+          {{ saveStatus === 'saving' ? '保存中...' : saveStatus === 'saved' ? '已保存 ✓' : saveStatus === 'error' ? '保存失败 ✗' : '保存到文档库' }}
+        </button>
         <button class="btn btn-outline btn-clear" @click="clearCanvas">清空画布</button>
       </div>
     </div>
@@ -257,6 +264,9 @@ const collaborationMode = ref('semi_auto')
 const maxSpeeches = ref(0)
 const customPrompt = ref('')
 const showCreateModal = ref(false)
+const saveStatus = ref('')  // '', 'saving', 'saved', 'error'
+const loadStatus = ref('')
+const draggingOverCanvas = ref(false)
 
 const customExperts = ref({})
 
@@ -324,7 +334,6 @@ function getAllExperts() {
 
 onMounted(() => {
   fetchCustomExperts()
-  if (props.projectId) loadDesign()
 })
 
 async function fetchCustomExperts() {
@@ -337,6 +346,7 @@ async function fetchCustomExperts() {
 }
 
 async function saveDesign() {
+  saveStatus.value = 'saving'
   try {
     const design = {
       meeting_name: meetingName.value,
@@ -353,38 +363,23 @@ async function saveDesign() {
         id: e.id, source: e.source, target: e.target, animated: true
       }))
     }
-    await axios.put(`/api/projects/${props.projectId}/meeting/design`, design)
+    const name = `编排设计 — ${meetingName.value || '未命名'}`
+    const res = await axios.post(`/api/projects/${props.projectId}/library`, {
+      name,
+      layer: 'orchestration',
+      content: design,
+      source: 'generate',
+      directory: '/',
+      tags: ['编排', meetingName.value]
+    })
+    await axios.put(`/api/projects/${props.projectId}/library/active/orchestration`, { uid: res.data.uid })
+    window.postMessage({ type: 'library-refresh' }, '*')
+    saveStatus.value = 'saved'
+    setTimeout(() => { saveStatus.value = '' }, 2000)
   } catch (e) {
+    saveStatus.value = 'error'
     console.warn('Save design failed:', e)
-  }
-}
-
-async function loadDesign() {
-  try {
-    const res = await axios.get(`/api/projects/${props.projectId}/meeting/design`)
-    const design = res.data.design
-    if (!design || !design.nodes) return
-
-    meetingName.value = design.meeting_name || '专家会议'
-    granularity.value = design.granularity || 'chapter'
-    collaborationMode.value = design.collaboration_mode || 'semi_auto'
-    maxSpeeches.value = design.max_speeches || 0
-
-    nodes.value = design.nodes.map(n => ({
-      id: n.id,
-      type: n.type || 'expert',
-      position: n.position,
-      parentNode: n.parentNode || null,
-      style: n.style || (n.type === 'expert' ? { zIndex: 5 } : { zIndex: 0 }),
-      data: { ...n.data }
-    }))
-    edges.value = design.edges.map(e => ({
-      id: e.id, source: e.source, target: e.target, animated: true
-    }))
-    nodeCounter = nodes.value.length
-    activePreset.value = 'custom'
-  } catch (e) {
-    console.warn('Load design failed:', e)
+    setTimeout(() => { saveStatus.value = '' }, 3000)
   }
 }
 
@@ -473,10 +468,21 @@ function onDragOver(event) {
 
 function onDrop(event) {
   event.preventDefault()
+  draggingOverCanvas.value = false
   const raw = event.dataTransfer.getData('application/json')
   if (!raw) return
   const data = JSON.parse(raw)
 
+  // Document drag from sidebar: if it has layer and uid, load design
+  if (data.layer && data.uid) {
+    if (data.layer === 'orchestration') {
+      loadDesignByUid(data.uid)
+    }
+    return
+  }
+
+  // Expert drag from toolbox
+  if (!data.expertId) return
   const canvasEl = event.target.closest('.vue-flow')
   if (!canvasEl) return
   const rect = canvasEl.getBoundingClientRect()
@@ -496,6 +502,56 @@ function onDrop(event) {
     },
     style: { zIndex: 5 }
   })
+}
+
+function onDragEnterCanvas(event) {
+  event.preventDefault()
+  draggingOverCanvas.value = true
+}
+
+function onDragLeaveCanvas(event) {
+  if (!event.currentTarget.contains(event.relatedTarget)) {
+    draggingOverCanvas.value = false
+  }
+}
+
+async function loadDesignByUid(uid) {
+  loadStatus.value = 'loading'
+  try {
+    const res = await axios.get(`/api/projects/${props.projectId}/library/${uid}`)
+    const { content } = res.data
+    if (!content || !content.nodes) {
+      loadStatus.value = 'empty'
+      setTimeout(() => { loadStatus.value = '' }, 2000)
+      return
+    }
+    loadStatus.value = 'loaded'
+    setTimeout(() => { loadStatus.value = '' }, 2000)
+
+    meetingName.value = content.meeting_name || '专家会议'
+    granularity.value = content.granularity || 'chapter'
+    collaborationMode.value = content.collaboration_mode || 'semi_auto'
+    maxSpeeches.value = content.max_speeches || 0
+
+    nodes.value = content.nodes.map(n => ({
+      id: n.id,
+      type: n.type || 'expert',
+      position: n.position,
+      parentNode: n.parentNode || null,
+      style: n.style || (n.type === 'expert' ? { zIndex: 5 } : { zIndex: 0 }),
+      data: { ...n.data }
+    }))
+    edges.value = content.edges.map(e => ({
+      id: e.id, source: e.source, target: e.target, animated: true
+    }))
+    nodeCounter = nodes.value.length
+    activePreset.value = 'custom'
+    selectedNode.value = null
+  } catch (e) {
+    loadStatus.value = 'error'
+    console.warn('Load design failed:', e)
+    setTimeout(() => { loadStatus.value = '' }, 3000)
+  }
 }
 
 function onConnect(connection) {
@@ -736,15 +792,30 @@ function promptForLoopCount(node) {
 .preset-btn:hover { background: #f0f7ff; border-color: #3498db; }
 .preset-btn.active { background: #3498db; color: white; border-color: #3498db; }
 
-/* ── 浮动工具栏 ── */
-.toolbar {
+/* ── 浮动工具栏（悬浮于画布上） ── */
+.floating-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 4px 8px;
-  background: rgba(255,255,255,0.95);
-  border-bottom: 1px solid #eee;
+  padding: 6px 12px;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 10px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+  z-index: 10;
 }
+.toolbar-label {
+  font-size: 0.7rem;
+  color: #999;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+.floating-toolbar .toolbar-sep { width: 1px; height: 20px; background: #ddd; margin: 0 4px; }
+
 .toolbar-btn {
   width: 32px;
   height: 32px;
@@ -759,7 +830,7 @@ function promptForLoopCount(node) {
   transition: all 0.15s;
 }
 .toolbar-btn:hover { background: #f0f7ff; border-color: #3498db; }
-.toolbar-sep { width: 1px; height: 20px; background: #ddd; margin: 0 4px; }
+.toolbar-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .canvas-layout {
   flex: 1;
@@ -853,7 +924,8 @@ function promptForLoopCount(node) {
 .btn-create-expert:hover { border-color: #3498db; color: #3498db; background: #f0f7ff; }
 
 /* ── 画布 ── */
-.canvas-area { flex: 1; position: relative; }
+.canvas-area { flex: 1; position: relative; transition: background 0.2s; border-radius: 4px; }
+.canvas-area.drag-over-canvas { background: rgba(52, 152, 219, 0.08); box-shadow: inset 0 0 0 2px #3498db; }
 .flow-canvas { width: 100%; height: 100%; }
 
 /* ── 配置面板 ── */
@@ -867,10 +939,28 @@ function promptForLoopCount(node) {
 .config-panel h4 {
   font-size: 0.85rem;
   color: #666;
-  margin: 0 0 12px 0;
+  margin: 0;
   padding-bottom: 6px;
   border-bottom: 1px solid #eee;
 }
+.panel-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.panel-header-row h4 { border: none; padding: 0; margin: 0; }
+.btn-back {
+  padding: 2px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: white;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: #3498db;
+  transition: all 0.15s;
+}
+.btn-back:hover { background: #f0f7ff; border-color: #3498db; }
 .config-field { margin-bottom: 10px; }
 .config-field label {
   display: block;
@@ -939,8 +1029,6 @@ function promptForLoopCount(node) {
 .btn-outline { background: white; color: #666; }
 .btn-sm { padding: 4px 10px; font-size: 0.8rem; }
 .btn-run { width: 100%; margin-top: 14px; padding: 10px; font-size: 0.95rem; }
-.save-bar { display: flex; gap: 6px; margin-top: 6px; }
-.btn-save { flex: 1; padding: 6px; font-size: 0.8rem; }
 .btn-clear { width: 100%; margin-top: 6px; padding: 8px; font-size: 0.85rem; }
 .config-actions { margin-top: 10px; }
 

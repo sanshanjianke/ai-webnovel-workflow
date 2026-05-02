@@ -704,6 +704,12 @@ const refresh = async () => {
   }
 }
 
+const onMessage = (event) => {
+  if (event.data?.type === 'library-refresh') {
+    refresh()
+  }
+}
+
 const startResize = (e) => {
   isResizing.value = true
   document.addEventListener('mousemove', handleResize)
@@ -729,11 +735,13 @@ onMounted(() => {
   refresh()
   document.addEventListener('click', hideContextMenu)
   window.addEventListener('library-refresh', refresh)
+  window.addEventListener('message', onMessage)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', hideContextMenu)
   window.removeEventListener('library-refresh', refresh)
+  window.removeEventListener('message', onMessage)
   stopResize()
 })
 
