@@ -271,7 +271,10 @@
       </div>
 
       <!-- ── 右侧面板：输入源队列 ── -->
-      <div class="config-panel" v-if="selectedNode && selectedNode.type === 'inputSource'">
+      <div class="config-panel" v-if="selectedNode && selectedNode.type === 'inputSource'"
+        @dragover.prevent="onQueueDragOver"
+        @drop.stop="onQueueDrop"
+        :class="{ 'drag-over': queueDragOver }">
         <div class="panel-header-row">
           <h4>📥 输入源队列</h4>
           <button class="btn-back" @click="selectedNode = null; showQueuePanel = false">← 返回</button>
@@ -290,7 +293,7 @@
             <button class="btn-x" @click="selectedNode.data.files.splice(i, 1)" title="移除">✕</button>
           </div>
         </div>
-        <div v-else class="queue-hint">添加 .md 文件，管道将按序逐个处理</div>
+        <div class="queue-hint" v-else>添加 .md 文件，或将文档库文件拖拽到此处</div>
         <div class="config-actions">
           <button class="btn btn-danger btn-sm" @click="removeNode">删除节点</button>
         </div>
@@ -462,8 +465,9 @@ const customExperts = ref({})
 
 // ── 输入源队列 ──
 const showQueuePanel = ref(false)
-const queueFiles = ref([])  // 兼容旧代码
+const queueFiles = ref([])
 const fileInput = ref(null)
+const queueDragOver = ref(false)
 
 function onFilesSelected(event) {
   const files = event.target.files
@@ -801,12 +805,6 @@ function onDrop(event) {
     return
   }
 
-  // 从文档库拖入文档 → 添加到输入源队列
-  if (data.uid && (data.layer || data.format)) {
-    addDocumentToInputSource(data.uid, data.name || '未命名')
-    return
-  }
-
   if (!data.expertId) return
   const canvasEl = event.target.closest('.vue-flow')
   if (!canvasEl) return
@@ -1057,23 +1055,27 @@ function inputSourceFiles() {
   return []
 }
 
-async function addDocumentToInputSource(uid, name) {
-  // 查找或创建输入源节点
-  let srcNode = nodes.value.find(n => n.type === 'inputSource')
-  if (!srcNode) {
-    const id = `input_${++nodeCounter}`
-    srcNode = { id, type: 'inputSource', position: { x: 80, y: 180 }, data: { label: '输入源', files: [], selected: false }, style: { zIndex: 5 } }
-    nodes.value.push(srcNode)
-  }
-  if (!srcNode.data.files) srcNode.data.files = []
-  // 避免重复
-  if (srcNode.data.files.some(f => f.uid === uid)) return
-  // 获取文档内容
+function onQueueDragOver(event) {
+  event.dataTransfer.dropEffect = 'copy'
+  queueDragOver.value = true
+}
+
+async function onQueueDrop(event) {
+  event.preventDefault()
+  queueDragOver.value = false
+  const raw = event.dataTransfer.getData('application/json')
+  if (!raw) return
+  let data
+  try { data = JSON.parse(raw) } catch (e) { return }
+  if (!data.uid || !data.name) return
+  if (!selectedNode.value || selectedNode.value.type !== 'inputSource') return
+  if (!selectedNode.value.data.files) selectedNode.value.data.files = []
+  if (selectedNode.value.data.files.some(f => f.uid === data.uid)) return
   try {
-    const res = await axios.get(`/api/projects/${props.projectId}/library/${uid}`)
+    const res = await axios.get(`/api/projects/${props.projectId}/library/${data.uid}`)
     const content = res.data.content
     const text = typeof content === 'string' ? content : (content.content || JSON.stringify(content, null, 2))
-    srcNode.data.files.push({ name, content: text, uid })
+    selectedNode.value.data.files.push({ name: data.name, content: text, uid: data.uid })
   } catch (e) {
     console.error('Failed to load document:', e)
   }
@@ -1359,4 +1361,5 @@ function hideNodeCtx() { nodeCtx.show = false }
 .btn-x:hover { background: #fee; color: #e74c3c; }
 .panel-header-row { display: flex; justify-content: space-between; align-items: center; }
 .panel-header-row h4 { margin: 0; font-size: 0.9rem; }
+.config-panel.drag-over { border: 2px dashed #22c55e; background: #f0fdf4; }
 </style>
