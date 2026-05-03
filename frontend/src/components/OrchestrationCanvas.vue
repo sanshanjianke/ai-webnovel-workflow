@@ -103,13 +103,6 @@
           <input v-model="containerCfg.name" @change="onContainerChange" />
         </div>
         <div class="config-field">
-          <label>发言模式</label>
-          <select v-model="containerCfg.chat_mode" @change="onContainerChange">
-            <option value="sequential">顺序会议</option>
-            <option value="group">群聊</option>
-          </select>
-        </div>
-        <div class="config-field">
           <label>并发方式</label>
           <select v-model="containerCfg.concurrency" @change="onContainerChange">
             <option value="serial">串行（一次一个）</option>
@@ -117,22 +110,61 @@
           </select>
         </div>
         <div class="config-field">
-          <label>总结师</label>
-          <select v-model="containerCfg.summarizer" @change="onContainerChange">
-            <option value="off">关闭</option>
-            <option value="every_round">每轮总结</option>
-            <option value="every_3">每 3 次发言</option>
+          <label>发言方式</label>
+          <select v-model="containerCfg.speaking_mode" @change="onContainerChange">
+            <option value="ordered">顺序循环（按连线）</option>
+            <option value="mention_driven">提及驱动（互相 @）</option>
           </select>
         </div>
         <div class="config-field">
-          <label>重复次数（1=不循环）</label>
-          <input v-model.number="containerCfg.repeat" type="number" min="1" max="100" @change="onContainerChange" />
+          <label>重复次数（1=不循环，提及驱动模式忽略此项）</label>
+          <input v-model.number="containerCfg.repeat" type="number" min="1" max="100" @change="onContainerChange" :disabled="containerCfg.speaking_mode === 'mention_driven'" />
+        </div>
+
+        <div class="config-section">
+          <label class="section-label">提及驱动退出条件</label>
         </div>
         <div class="config-field">
+          <label>退出方式</label>
+          <select v-model="containerCfg.exit_mode" @change="onContainerChange" :disabled="containerCfg.speaking_mode !== 'mention_driven'">
+            <option value="manual">手动</option>
+            <option value="consensus">全部赞同</option>
+            <option value="ratio">多数赞同</option>
+            <option value="gatekeeper">门禁专家</option>
+          </select>
+        </div>
+        <div class="config-field" v-if="containerCfg.exit_mode === 'ratio'">
+          <label>赞同比例 ({{ (containerCfg.exit_ratio * 100).toFixed(0) }}%)</label>
+          <input v-model.number="containerCfg.exit_ratio" type="range" min="0.1" max="1" step="0.1" @change="onContainerChange" :disabled="containerCfg.speaking_mode !== 'mention_driven'" />
+        </div>
+        <div class="config-field" v-if="containerCfg.exit_mode === 'gatekeeper'">
+          <label>门禁专家</label>
+          <select v-model="containerCfg.exit_gatekeeper" @change="onContainerChange" :disabled="containerCfg.speaking_mode !== 'mention_driven'">
+            <option :value="null">---</option>
+            <option v-for="child in containerChildren" :key="child" :value="child">{{ child }}</option>
+          </select>
+        </div>
+        <div class="config-field">
+          <label>最大发言次数（0=不限）</label>
+          <input v-model.number="containerCfg.exit_max_speeches" type="number" min="0" max="500" @change="onContainerChange" :disabled="containerCfg.speaking_mode !== 'mention_driven'" />
+        </div>
+
+        <div class="config-section">
+          <label class="section-label">上下文深度（可选，以先触达为准）</label>
+        </div>
+        <div class="config-field config-inline">
           <label class="checkbox-label">
-            <input type="checkbox" v-model="containerCfg.mention_isolation" @change="onContainerChange" />
-            @提及隔离（仅框内生效）
+            <input type="checkbox" v-model="containerCfg.use_layers" @change="onContainerChange" />
+            按楼层
           </label>
+          <input v-if="containerCfg.use_layers" v-model.number="containerCfg.context_layers" type="number" min="1" max="50" placeholder="层数" @change="onContainerChange" style="width:70px;margin-left:8px;" />
+        </div>
+        <div class="config-field config-inline">
+          <label class="checkbox-label">
+            <input type="checkbox" v-model="containerCfg.use_tokens" @change="onContainerChange" />
+            按 token
+          </label>
+          <input v-if="containerCfg.use_tokens" v-model.number="containerCfg.context_tokens" type="number" min="1000" max="1000000" step="10000" placeholder="token数" @change="onContainerChange" style="width:100px;margin-left:8px;" />
         </div>
         <div class="config-actions">
           <button class="btn btn-danger btn-sm" @click="removeNode">删除容器</button>
@@ -325,8 +357,16 @@ const newExpert = reactive({
 })
 
 const containerCfg = reactive({
-  name: '容器', chat_mode: 'sequential', concurrency: 'serial',
-  summarizer: 'off', repeat: 1, mention_isolation: true
+  name: '容器', concurrency: 'serial', speaking_mode: 'ordered',
+  use_layers: false, context_layers: null,
+  use_tokens: false, context_tokens: null,
+  repeat: 1,
+  exit_mode: 'manual', exit_ratio: 0.6, exit_gatekeeper: null, exit_max_speeches: 20
+})
+
+const containerChildren = computed(() => {
+  if (!selectedNode.value || selectedNode.value.type !== 'container') return []
+  return selectedNode.value.data.children || []
 })
 
 let nodeCounter = 0
@@ -566,19 +606,34 @@ function getExpertIcon(node) {
 
 function onContainerChange() {
   if (selectedNode.value && selectedNode.value.type === 'container') {
-    Object.assign(selectedNode.value.data, { ...containerCfg })
+    selectedNode.value.data.name = containerCfg.name
     selectedNode.value.data.label = containerCfg.name
+    selectedNode.value.data.concurrency = containerCfg.concurrency
+    selectedNode.value.data.speaking_mode = containerCfg.speaking_mode
+    selectedNode.value.data.context_layers = containerCfg.use_layers ? (containerCfg.context_layers || 3) : null
+    selectedNode.value.data.context_tokens = containerCfg.use_tokens ? (containerCfg.context_tokens || 100000) : null
+    selectedNode.value.data.repeat = containerCfg.repeat
+    selectedNode.value.data.exit_mode = containerCfg.exit_mode
+    selectedNode.value.data.exit_ratio = containerCfg.exit_ratio
+    selectedNode.value.data.exit_gatekeeper = containerCfg.exit_gatekeeper
+    selectedNode.value.data.exit_max_speeches = containerCfg.exit_max_speeches
     updateContainerChildren()
   }
 }
 
 function loadContainerConfig(node) {
   containerCfg.name = node.data.name || node.data.label || '容器'
-  containerCfg.chat_mode = node.data.chat_mode || 'sequential'
   containerCfg.concurrency = node.data.concurrency || 'serial'
-  containerCfg.summarizer = node.data.summarizer || 'off'
+  containerCfg.speaking_mode = node.data.speaking_mode || 'ordered'
+  containerCfg.use_layers = node.data.context_layers != null
+  containerCfg.context_layers = node.data.context_layers ?? null
+  containerCfg.use_tokens = node.data.context_tokens != null
+  containerCfg.context_tokens = node.data.context_tokens ?? null
   containerCfg.repeat = node.data.repeat || 1
-  containerCfg.mention_isolation = node.data.mention_isolation !== false
+  containerCfg.exit_mode = node.data.exit_mode || 'manual'
+  containerCfg.exit_ratio = node.data.exit_ratio ?? 0.6
+  containerCfg.exit_gatekeeper = node.data.exit_gatekeeper ?? null
+  containerCfg.exit_max_speeches = node.data.exit_max_speeches ?? 20
 }
 
 // ── 发言顺序计算 ──
@@ -603,7 +658,8 @@ const orderedNodes = computed(() => {
   while (queue.length > 0) {
     const current = queue.shift()
     const container = nodes.value.find(n => n.id === current.parentNode && n.type === 'container')
-    const repeat = container ? (container.data.repeat || 1) : 1
+    const isMentionDriven = container && container.data.speaking_mode === 'mention_driven'
+    const repeat = isMentionDriven ? 1 : (container ? (container.data.repeat || 1) : 1)
     const containerName = container ? container.data.name : null
     for (let i = 0; i < repeat; i++) {
       result.push({ ...current, containerName, loopIteration: repeat > 1 ? i + 1 : 0 })
@@ -633,10 +689,15 @@ function runMeeting() {
     .map(n => ({
       container_id: n.id,
       name: n.data.name || n.data.label || '容器',
-      chat_mode: n.data.chat_mode || 'sequential',
       concurrency: n.data.concurrency || 'serial',
-      summarizer: n.data.summarizer || 'off',
+      speaking_mode: n.data.speaking_mode || 'ordered',
+      context_layers: n.data.context_layers ?? null,
+      context_tokens: n.data.context_tokens ?? null,
       repeat: n.data.repeat || 1,
+      exit_mode: n.data.exit_mode || 'manual',
+      exit_ratio: n.data.exit_ratio ?? 0.6,
+      exit_gatekeeper: n.data.exit_gatekeeper ?? null,
+      exit_max_speeches: n.data.exit_max_speeches ?? 20,
       mention_isolation: n.data.mention_isolation !== false,
       children: n.data.children || [],
       edges: edges.value
@@ -708,8 +769,10 @@ function addContainer() {
     id, type: 'container', position: { x: 250, y: 180 },
     data: {
       name: '容器', label: '容器', icon: '📦',
-      chat_mode: 'sequential', concurrency: 'serial', summarizer: 'off',
-      repeat: 1, mention_isolation: true,
+      concurrency: 'serial', speaking_mode: 'ordered',
+      context_layers: null, context_tokens: null,
+      repeat: 1,
+      exit_mode: 'manual', exit_ratio: 0.6, exit_gatekeeper: null, exit_max_speeches: 20,
       children: [], width: 520, height: 280
     },
     style: { zIndex: 0 }
@@ -824,6 +887,10 @@ function onPaneClick() {
 .btn-run { width: 100%; margin-top: 14px; padding: 10px; font-size: 0.95rem; }
 .btn-clear { width: 100%; margin-top: 6px; padding: 8px; font-size: 0.85rem; }
 .config-actions { margin-top: 10px; }
+.config-section { margin: 12px 0 6px 0; }
+.section-label { font-size: 0.7rem; color: #888; font-weight: 600; text-transform: uppercase; }
+.config-inline { display: flex; align-items: center; gap: 6px; }
+.config-inline label { margin-bottom: 0 !important; }
 
 .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 999; }
 .modal-content { width: 520px; max-width: 90vw; max-height: 85vh; overflow-y: auto; background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }

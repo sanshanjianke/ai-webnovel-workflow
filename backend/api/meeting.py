@@ -46,11 +46,15 @@ class ExpertConfigRequest(BaseModel):
 class ContainerConfigRequest(BaseModel):
     container_id: str
     name: str = "容器"
-    chat_mode: Literal["sequential", "group"] = "sequential"
     concurrency: Literal["serial", "parallel"] = "serial"
-    summarizer: Literal["off", "every_round", "every_3"] = "off"
+    speaking_mode: Literal["ordered", "mention_driven"] = "ordered"
+    context_layers: Optional[int] = None
+    context_tokens: Optional[int] = None
     repeat: int = 1
-    mention_isolation: bool = True
+    exit_mode: Literal["manual", "consensus", "ratio", "gatekeeper"] = "manual"
+    exit_ratio: float = 0.6
+    exit_gatekeeper: Optional[str] = None
+    exit_max_speeches: int = 20
     children: list[str] = []
     edges: list[dict] = []
 
@@ -252,11 +256,15 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
         ContainerConfig(
             container_id=c.container_id,
             name=c.name,
-            chat_mode=c.chat_mode,
             concurrency=c.concurrency,
-            summarizer=c.summarizer,
+            speaking_mode=c.speaking_mode,
+            context_layers=c.context_layers,
+            context_tokens=c.context_tokens,
             repeat=c.repeat,
-            mention_isolation=c.mention_isolation,
+            exit_mode=c.exit_mode,
+            exit_ratio=c.exit_ratio,
+            exit_gatekeeper=c.exit_gatekeeper,
+            exit_max_speeches=c.exit_max_speeches,
             children=c.children,
             edges=c.edges,
         )

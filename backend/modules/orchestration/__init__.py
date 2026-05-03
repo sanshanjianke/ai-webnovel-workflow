@@ -108,14 +108,12 @@ class MeetingEngine:
         return False
 
     def _detect_mention(self, text: str, container_id: Optional[str] = None) -> Optional[str]:
-        """检测专家输出中的 @提及，若 mention_isolation 则限定同容器内"""
+        """检测 @提及。若在容器内，仅匹配同容器专家。"""
         names_to_id = {}
-        all_experts = set()
         for ec in self.config.experts:
             expert = self.get_expert(ec.expert_id, ec.role)
             names_to_id[expert.expert_type] = ec.expert_id
             names_to_id[ec.expert_id] = ec.expert_id
-            all_experts.add(ec.expert_id)
 
         matches = MENTION_RE.findall(text)
         for name in matches:
@@ -123,19 +121,15 @@ class MeetingEngine:
                 continue
             target_id = names_to_id[name]
             if container_id:
-                container = self._container_map.get(container_id)
-                if container and container.mention_isolation:
-                    # check if target is in same container
-                    target_container = self._expert_containers.get(
-                        self._get_expert_unique_id(target_id, ExpertRole.MAIN))
-                    if not target_container:
-                        # try any role
-                        for key, cid in self._expert_containers.items():
-                            if key.startswith(target_id):
-                                target_container = cid
-                                break
-                    if target_container != container_id:
-                        continue
+                target_container = self._expert_containers.get(
+                    self._get_expert_unique_id(target_id, ExpertRole.MAIN))
+                if not target_container:
+                    for key, cid in self._expert_containers.items():
+                        if key.startswith(target_id):
+                            target_container = cid
+                            break
+                if target_container != container_id:
+                    continue
             return target_id
         return None
 
@@ -215,13 +209,34 @@ class MeetingEngine:
         speaker_pool = self._build_speaker_pool()
         pool_idx = 0
 
+        # 提及驱动模式状态
+        mention_driven_containers = {
+            cid: c for cid, c in self._container_map.items()
+            if c.speaking_mode == "mention_driven"
+        }
+        container_last_active: dict[str, dict[str, int]] = {
+            cid: {} for cid in mention_driven_containers
+        }
+
         while not self._should_exit():
+            # 判断下一位发言人
             forced = self._handle_force_next(speaker_pool)
             if forced:
                 expert_id, role, container_id = forced
             else:
                 expert_id, role, container_id = speaker_pool[pool_idx % len(speaker_pool)]
                 pool_idx += 1
+
+            # 提及驱动模式下，若无 @提及且非强制，改由引擎选择下一位
+            if container_id and container_id in mention_driven_containers and not forced:
+                container = self._container_map[container_id]
+                expert_id, role = self._pick_mention_driven_speaker(
+                    container, container_last_active.get(container_id, {}))
+                # 检查退出条件
+                exit_check = self._check_mention_driven_exit(container_id, container)
+                if exit_check:
+                    yield exit_check
+                    break
 
             # 轮次播报
             if pool_idx % len(speaker_pool) == 1:
@@ -242,15 +257,15 @@ class MeetingEngine:
             if container_id:
                 container = self._container_map.get(container_id)
                 if container:
-                    container_context = f"\n[你在容器「{container.name}」中，当前模式: {container.chat_mode}]"
-                    # 注入容器内历史
+                    container_context = f"\n[你在容器「{container.name}」中，并发模式: {container.concurrency}]"
                     container_hist = self._container_histories.get(container_id, [])
-                    if container.chat_mode == "group" and container_hist:
+                    if container_hist:
+                        recent = self._apply_context_depth(container_hist, container)
                         hist_text = "\n".join([
                             f"[{op.expert_type}] {op.content[:200]}..."
-                            for op in container_hist[-5:]
+                            for op in recent[-10:]
                         ])
-                        container_context += f"\n\n容器内已有讨论:\n{hist_text}"
+                        container_context += f"\n\n容器内讨论历史:\n{hist_text}"
 
             context = {
                 "vision": context_input,
@@ -312,12 +327,8 @@ class MeetingEngine:
                 if container and container.repeat > 1:
                     container_pool = self._get_container_speaker_pool(container)
                     container_hist = self._container_histories.get(container_id, [])
-                    container_rounds = self._container_rounds.get(container_id, 0)
                     if container_hist and len(container_hist) % len(container_pool) == 0:
-                        self._container_rounds[container_id] = container_rounds + 1
-                        # 容器内一轮完成，触发总结师
-                        if container.summarizer == "every_round":
-                            yield self._generate_summary(container_id, container)
+                        self._container_rounds[container_id] = container_rounds.get(container_id, 0) + 1
                         if self._container_rounds[container_id] >= container.repeat:
                             self._container_exit_requested.add(container_id)
 
@@ -362,35 +373,93 @@ class MeetingEngine:
         yield {"type": "output_ready", "output": output, "speech_count": self._speech_count, "rounds": self._round_idx}
         return output
 
-    def _generate_summary(self, container_id: str, container: ContainerConfig) -> dict:
-        """容器内总结师发言"""
-        container_hist = self._container_histories.get(container_id, [])
-        if not container_hist:
-            return {"type": "summarizer", "container_id": container_id, "content": ""}
+    def _apply_context_depth(self, history: list[ExpertOpinion], container: ContainerConfig) -> list[ExpertOpinion]:
+        """根据容器的 context_layers / context_tokens 截断历史"""
+        layers = container.context_layers
+        tokens = container.context_tokens
+        if not layers and not tokens:
+            return history
 
-        llm = self._get_llm()
-        hist_text = "\n\n".join([
-            f"### {op.expert_type} ({op.role.value})\n{op.content}"
-            for op in container_hist[-10:]
-        ])
+        pool = self._get_container_speaker_pool(container)
+        pool_size = len(pool) if pool else 3
 
-        prompt = f"""你是讨论总结师。请总结以下专家讨论，提炼共识、标注分歧、保持格式规范。
+        result = history[:]
+        if layers:
+            cutoff = layers * pool_size
+            if len(result) > cutoff:
+                result = result[-cutoff:]
+        if tokens:
+            total = 0
+            for i in range(len(result) - 1, -1, -1):
+                total += len(result[i].content)
+                if total > tokens:
+                    result = result[i + 1:]
+                    break
+        return result
 
-讨论内容：
-{hist_text}
+    def _pick_mention_driven_speaker(self, container: ContainerConfig, last_active: dict) -> tuple:
+        """提及驱动模式：选择下一位发言人。优先最近 @提及目标，否则选最不活跃的。"""
+        if self._force_next_expert:
+            eid = self._force_next_expert
+            self._force_next_expert = None
+            for ec in self.config.experts:
+                if ec.expert_id == eid and ec.container_id == container.container_id:
+                    return (eid, ec.role)
+            return (eid, ExpertRole.MAIN)
 
-请简洁总结（200字以内）：
-1. 共识点
-2. 分歧点
-3. 下一步建议"""
+        pool = self._get_container_speaker_pool(container)
+        if not pool:
+            return ("web_editor_v1", ExpertRole.MAIN)
 
-        content = llm.invoke(prompt, temperature=0.5)
-        return {
-            "type": "summarizer",
-            "container_id": container_id,
-            "container_name": container.name,
-            "content": content
-        }
+        # 选最不活跃的专家
+        now = self._speech_count
+        best = pool[0]
+        best_score = last_active.get(best[0], -1)
+        for eid, role in pool:
+            score = last_active.get(eid, -1)
+            if score < best_score:
+                best = (eid, role)
+                best_score = score
+        return best
+
+    def _check_mention_driven_exit(self, container_id: str, container: ContainerConfig) -> Optional[dict]:
+        """检查提及驱动模式的退出条件"""
+        mode = container.exit_mode
+        hist = self._container_histories.get(container_id, [])
+
+        # 最大发言兜底
+        if container.exit_max_speeches > 0:
+            container_speeches = sum(1 for op in hist if op.expert_id in [
+                eid for eid, _ in self._get_container_speaker_pool(container)])
+            if container_speeches >= container.exit_max_speeches:
+                return {"type": "exit_trigger", "reason": "max_speeches", "container_id": container_id}
+
+        if mode == "manual":
+            return None
+
+        # 检测最近的发言是否表达了结束意愿
+        recent = hist[-3:] if len(hist) >= 3 else hist
+        exit_keywords = ["会议结束", "讨论已充分", "可以结束", "没有更多意见", "同意结束", "到此为止"]
+        agree_count = 0
+        pool_size = max(len(self._get_container_speaker_pool(container)), 1)
+
+        for op in recent:
+            if any(kw in op.content for kw in exit_keywords):
+                agree_count += 1
+
+        if mode == "consensus" and agree_count >= pool_size:
+            return {"type": "exit_trigger", "reason": "consensus", "container_id": container_id}
+        if mode == "ratio" and pool_size > 0 and agree_count / pool_size >= container.exit_ratio:
+            return {"type": "exit_trigger", "reason": "ratio", "container_id": container_id,
+                    "ratio": agree_count / pool_size}
+        if mode == "gatekeeper" and container.exit_gatekeeper:
+            for op in recent:
+                if op.expert_id == container.exit_gatekeeper and any(
+                        kw in op.content for kw in exit_keywords):
+                    return {"type": "exit_trigger", "reason": "gatekeeper", "container_id": container_id,
+                            "gatekeeper": container.exit_gatekeeper}
+
+        return None
 
     def _get_llm(self):
         from backend.core.config import get_config

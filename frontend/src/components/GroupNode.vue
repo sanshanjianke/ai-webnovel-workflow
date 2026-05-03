@@ -4,10 +4,11 @@
       <span class="container-icon">{{ data.icon || '📦' }}</span>
       <span class="container-label">{{ data.name || '容器' }}</span>
       <div class="container-tags">
-        <span v-if="data.chat_mode === 'group'" class="tag tag-chat">群聊</span>
         <span v-if="data.concurrency === 'parallel'" class="tag tag-para">并行</span>
-        <span v-if="(data.repeat || 1) > 1" class="tag tag-loop">{{ data.repeat }}轮</span>
-        <span v-if="data.summarizer !== 'off'" class="tag tag-sum">总结</span>
+        <span v-if="data.speaking_mode === 'mention_driven'" class="tag tag-mention">@驱动</span>
+        <span v-if="data.context_layers != null" class="tag tag-depth">{{ data.context_layers }}层</span>
+        <span v-if="data.context_tokens != null" class="tag tag-depth">{{ (data.context_tokens / 1000).toFixed(0) }}K</span>
+        <span v-if="(data.repeat || 1) > 1 && data.speaking_mode !== 'mention_driven'" class="tag tag-loop">{{ data.repeat }}轮</span>
       </div>
       <button class="container-resize" @mousedown.stop="startResize" title="拖拽调整大小">⟲</button>
     </div>
@@ -97,6 +98,8 @@ function startResize(e) {
 }
 .tag-chat { background: #e8f5e9; color: #2e7d32; }
 .tag-para { background: #fff3e0; color: #e65100; }
+.tag-mention { background: #e0f2f1; color: #00695c; }
+.tag-depth { background: #ede7f6; color: #4527a0; }
 .tag-loop { background: #e3f2fd; color: #1565c0; }
 .tag-sum { background: #fce4ec; color: #c62828; }
 .container-resize {
