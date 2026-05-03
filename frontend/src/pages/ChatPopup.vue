@@ -2,6 +2,7 @@
   <div class="chat-popup">
     <div class="popup-header">
       <h2>{{ title }}</h2>
+      <span class="queue-badge" v-if="queueState.total > 1">📥 {{ queueState.index }}/{{ queueState.total }}</span>
       <span class="popup-status" v-if="isRunning">● 运行中</span>
       <span class="popup-status stopped" v-else>已完成</span>
     </div>
@@ -39,6 +40,7 @@ const title = computed(() => route.query.name || (targetId.value === 'solo' ? '�
 const messages = ref([])
 const isRunning = ref(true)
 const msgEl = ref(null)
+const queueState = ref({ index: 0, total: 0 })
 let channel = null
 
 function getIcon(msg) {
@@ -64,11 +66,26 @@ onMounted(() => {
 
     if (type === 'done') {
       isRunning.value = false
-      // 结束当前流的消息
       const msgs = messages.value
       for (let i = msgs.length - 1; i >= 0; i--) {
         if (msgs[i].streaming) { msgs[i].streaming = false; break }
       }
+      return
+    }
+
+    if (type === 'queue_item_start') {
+      queueState.value = { index: (data.index || 0) + 1, total: data.total || 0 }
+      messages.value = []  // 清空上一份文件的聊天
+      return
+    }
+
+    if (type === 'queue_item_complete') {
+      return
+    }
+
+    if (type === 'queue_complete') {
+      isRunning.value = false
+      queueState.value = { index: data.total || 0, total: data.total || 0 }
       return
     }
 
@@ -152,6 +169,7 @@ onUnmounted(() => {
 .popup-header h2 { margin: 0; font-size: 1rem; }
 .popup-status { font-size: 0.75rem; color: #27ae60; font-weight: 600; }
 .popup-status.stopped { color: #999; }
+.queue-badge { font-size: 0.75rem; background: #3498db; color: white; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
 .popup-messages { flex: 1; overflow-y: auto; padding: 1rem; }
 .message { margin-bottom: 1rem; padding: 0.75rem; border-radius: 8px; background: white; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
 .message.system { background: #e3f2fd; text-align: center; font-style: italic; color: #666; }

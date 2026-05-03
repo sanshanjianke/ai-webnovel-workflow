@@ -72,6 +72,7 @@ class MeetingStartRequest(BaseModel):
     containers: list[ContainerConfigRequest] = []
     edges: list[dict] = []
     pipeline: bool = False
+    queue_files: list[str] = []  # 批量处理：每个元素是一份 .md 文本内容
 
 
 class MeetingFeedback(BaseModel):
@@ -354,23 +355,43 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
     use_pipeline = getattr(request, 'pipeline', False)
 
     if use_pipeline:
+        queue_files = getattr(request, 'queue_files', []) or []
+
         # 管道模式：同步生成器（像 L1 聊天），在独立线程中运行避免阻塞事件循环
         def pipeline_stream():
             try:
-                for event in engine.run_pipeline(vision, worldbook_text):
-                    if event["type"] == "expert_speak":
-                        logger.log_meeting(
-                            project_id=project_id,
-                            expert_id=event.get("expert_id", ""),
-                            expert_type=event.get("expert_type", ""),
-                            content=event.get("content", ""),
-                            suggestions=event.get("suggestions", []),
-                            round=engine.current_round
-                        )
-                    if event["type"] == "pipeline_complete":
-                        output = event.get("output", {})
-                        logger.log_version(project_id, "pipeline", output, "Pipeline completed")
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                files = queue_files if queue_files else [None]  # None = 用 vision
+
+                yield f"data: {json.dumps({'type': 'queue_start', 'total': len(files)}, ensure_ascii=False)}\n\n"
+
+                for qi, file_content in enumerate(files):
+                    ctx = vision.copy()
+                    if file_content:
+                        ctx["queue_input"] = file_content
+                        ctx["queue_index"] = qi + 1
+                        ctx["queue_total"] = len(files)
+
+                    yield f"data: {json.dumps({'type': 'queue_item_start', 'index': qi, 'total': len(files)}, ensure_ascii=False)}\n\n"
+
+                    for event in engine.run_pipeline(ctx, worldbook_text):
+                        event["queue_index"] = qi
+                        event["queue_total"] = len(files)
+                        if event["type"] == "expert_speak":
+                            logger.log_meeting(
+                                project_id=project_id,
+                                expert_id=event.get("expert_id", ""),
+                                expert_type=event.get("expert_type", ""),
+                                content=event.get("content", ""),
+                                suggestions=event.get("suggestions", []),
+                                round=engine.current_round
+                            )
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+                    yield f"data: {json.dumps({'type': 'queue_item_complete', 'index': qi, 'total': len(files)}, ensure_ascii=False)}\n\n"
+
+                if queue_files:
+                    logger.log_version(project_id, "pipeline", {"queue_total": len(files)}, "Batch pipeline completed")
+                yield f"data: {json.dumps({'type': 'queue_complete', 'total': len(files)}, ensure_ascii=False)}\n\n"
             except Exception as e:
                 import traceback
                 traceback.print_exc()

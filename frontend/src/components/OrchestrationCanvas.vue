@@ -94,6 +94,7 @@
           <button class="toolbar-btn" @click="addPlaceholder('rag')" title="RAG节点">🔍</button>
           <button class="toolbar-btn" @click="addPlaceholder('splitter')" title="章节拆分师">✂️</button>
           <span class="toolbar-sep"></span>
+          <button class="toolbar-btn" @click="showQueuePanel = !showQueuePanel" :class="{ active: showQueuePanel }" title="输入源（批量.md文件）">📥 {{ queueFiles.length || '' }}</button>
           <button class="toolbar-btn" @click="saveDesign" :disabled="!projectId || saveStatus === 'saving'" :title="saveStatus === 'saved' ? '已保存' : saveStatus === 'error' ? '保存失败' : '保存到文档库'">
             {{ saveStatus === 'saving' ? '⏳' : saveStatus === 'saved' ? '✅' : saveStatus === 'error' ? '❌' : '💾' }}
           </button>
@@ -391,6 +392,29 @@
         </div>
       </div>
     </div>
+
+    <!-- ── 输入源队列面板 ── -->
+    <div class="queue-panel" v-if="showQueuePanel">
+      <div class="panel-header-row">
+        <h4>📥 输入源队列</h4>
+        <button class="btn-back" @click="showQueuePanel = false">✕</button>
+      </div>
+      <div class="queue-actions">
+        <input ref="fileInput" type="file" accept=".md,.txt" multiple @change="onFilesSelected" style="display:none" />
+        <button class="btn btn-sm" @click="$refs.fileInput.click()">+ 添加文件</button>
+        <button class="btn btn-sm" @click="queueFiles = []" :disabled="queueFiles.length === 0">清空</button>
+        <button class="btn btn-sm" @click="addTextAsFile">📝 粘贴文本</button>
+      </div>
+      <div class="queue-list" v-if="queueFiles.length > 0">
+        <div v-for="(f, i) in queueFiles" :key="i" class="queue-item">
+          <span class="queue-idx">{{ i + 1 }}</span>
+          <span class="queue-name">{{ f.name }}</span>
+          <span class="queue-size">{{ (f.content.length / 1000).toFixed(1) }}KB</span>
+          <button class="btn-x" @click="queueFiles.splice(i, 1)" title="移除">✕</button>
+        </div>
+      </div>
+      <div v-else class="queue-hint">添加 .md 文件到队列，管道将按序逐个处理</div>
+    </div>
   </div>
 </template>
 
@@ -431,6 +455,31 @@ const customPrompt = ref('')
 const importInput = ref(null)
 
 const customExperts = ref({})
+
+// ── 输入源队列 ──
+const showQueuePanel = ref(false)
+const queueFiles = ref([])  // [{ name, content }]
+const fileInput = ref(null)
+
+function onFilesSelected(event) {
+  const files = event.target.files
+  for (const f of files) {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      queueFiles.value.push({ name: f.name, content: e.target.result })
+    }
+    reader.readAsText(f)
+  }
+  event.target.value = ''
+}
+
+function addTextAsFile() {
+  const text = prompt('粘贴 .md 文本内容：')
+  if (text && text.trim()) {
+    const name = '粘贴文本_' + (queueFiles.value.length + 1) + '.md'
+    queueFiles.value.push({ name, content: text.trim() })
+  }
+}
 
 const newExpert = reactive({
   id: '',
@@ -961,6 +1010,7 @@ function runMeeting() {
     pipeline: true,
     experts,
     containers,
+    queue_files: queueFiles.value.map(f => f.content),
     edges: edges.value.filter(e => {
       const isInterContainer = nodes.value.some(n => 
         (n.type === 'container' && (e.source === n.id || e.target === n.id || 
@@ -1230,4 +1280,23 @@ function hideNodeCtx() { nodeCtx.show = false }
   font-family: monospace; font-size: 0.8rem; white-space: pre-wrap;
   max-height: 200px; overflow-y: auto; margin: 0;
 }
+
+/* ── 输入源队列面板 ── */
+.queue-panel {
+  position: absolute; bottom: 12px; left: 12px; right: 12px;
+  background: white; border: 1px solid #d0d0d0; border-radius: 10px;
+  box-shadow: 0 -2px 12px rgba(0,0,0,0.1); z-index: 10;
+  padding: 12px; max-height: 200px; overflow-y: auto;
+}
+.queue-actions { display: flex; gap: 8px; margin: 8px 0; }
+.queue-list { display: flex; flex-direction: column; gap: 4px; }
+.queue-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: #f8f9fa; border-radius: 6px; font-size: 0.85rem; }
+.queue-idx { background: #3498db; color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 600; flex-shrink: 0; }
+.queue-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue-size { color: #999; font-size: 0.75rem; flex-shrink: 0; }
+.queue-hint { color: #999; font-size: 0.85rem; text-align: center; padding: 1rem; }
+.btn-x { width: 22px; height: 22px; border: none; background: transparent; cursor: pointer; color: #999; font-size: 0.9rem; border-radius: 50%; }
+.btn-x:hover { background: #fee; color: #e74c3c; }
+.panel-header-row { display: flex; justify-content: space-between; align-items: center; }
+.panel-header-row h4 { margin: 0; font-size: 0.9rem; }
 </style>

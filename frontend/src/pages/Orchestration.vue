@@ -103,6 +103,12 @@ async function startMeeting(config) {
 
 function handleSSEEvent(type, data) {
   switch (type) {
+    case 'queue_start':
+    case 'queue_item_start':
+    case 'queue_item_complete':
+    case 'queue_complete':
+      broadcast(type, data)
+      break
     case 'expert_speak':
       speechCount.value = data.speech_count || (speechCount.value + 1)
       broadcast('message', data)
