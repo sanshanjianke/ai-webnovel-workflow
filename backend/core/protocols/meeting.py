@@ -38,6 +38,8 @@ class ContainerConfig(BaseModel):
     context_layers: Optional[int] = None
     context_tokens: Optional[int] = None
     repeat: int = 1
+    interrupt_mode: Optional[str] = None  # None=不覆盖, auto/every_n_msgs/every_n_tokens/on_mention
+    interrupt_threshold: int = 1
     exit_mode: Literal["manual", "consensus", "ratio", "gatekeeper"] = "manual"
     exit_ratio: float = 0.6
     exit_gatekeeper: Optional[str] = None
@@ -52,7 +54,9 @@ class ExpertConfig(BaseModel):
     expert_id: str
     role: ExpertRole = ExpertRole.MAIN
     custom_prompt: Optional[str] = None
-    container_id: Optional[str] = None  # which container this expert belongs to
+    container_id: Optional[str] = None
+    interrupt_mode: Literal["auto", "every_n_msgs", "every_n_tokens", "on_mention"] = "every_n_msgs"
+    interrupt_threshold: int = 1  # N messages or ~N tokens
 
 
 class MeetingConfig(BaseModel):

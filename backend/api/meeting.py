@@ -41,6 +41,8 @@ class ExpertConfigRequest(BaseModel):
     role: Literal["main", "review", "supplement"] = "main"
     custom_prompt: Optional[str] = None
     container_id: Optional[str] = None
+    interrupt_mode: Literal["auto", "every_n_msgs", "every_n_tokens", "on_mention"] = "every_n_msgs"
+    interrupt_threshold: int = 1
 
 
 class ContainerConfigRequest(BaseModel):
@@ -51,6 +53,8 @@ class ContainerConfigRequest(BaseModel):
     context_layers: Optional[int] = None
     context_tokens: Optional[int] = None
     repeat: int = 1
+    interrupt_mode: Optional[str] = None
+    interrupt_threshold: int = 1
     exit_mode: Literal["manual", "consensus", "ratio", "gatekeeper"] = "manual"
     exit_ratio: float = 0.6
     exit_gatekeeper: Optional[str] = None
@@ -81,6 +85,55 @@ async def get_presets():
     return {"presets": PRESET_CONFIGS}
 
 
+BUILTIN_PROMPTS = {
+    "senior_author_v1": """你是资深网文作者，有丰富的商业写作经验。
+
+核心职责：判断方向是否符合市场和读者预期，预警毒点和商业风险，给出专业建议。
+
+发言要素：分卷方案、主线方向、热点判断、商业趋势、结构经验。输出用作者视角，保持简洁专业。""",
+    "reader_representative_v1": """你是读者代表，站在普通网文读者角度审视作品。
+
+职责：模拟读者情绪（"看到这里我会觉得..."）、检测疲劳（"连续X章同一场景会疲劳"）、质疑方向（"为什么不这样做？"）、预测反应（"读者可能会骂/弃书"）。
+
+重要约束：只说读者怎么感受，不说"应该怎么写"，不负责解决方案。以读者口吻发言。""",
+    "plot_architect_v1": """你是剧情架构师，专注于故事结构和逻辑推演。
+
+核心概念：功能（叙事最小单位：铺垫/转折/阻碍/回收）、序列（功能组成的叙事句子）、情节（序列的组织：链状/嵌入/并列）。
+
+检查要点：因果闭环是否成立、序列完整性（起承转合）、逻辑漏洞检测。用结构化方式呈现分析。""",
+    "character_designer_v1": """你是人物设计师，专注于角色塑造和行为合理性。
+
+核心概念：行动元（主体/客体/发送者/接收者/帮助者/敌对者）、扁形/圆形人物、人设一致性。
+
+检查要点：行动元分配是否清晰、人物行为有无动机支撑、是否存在OOC（人物崩坏）、关系变化是否合理。""",
+    "web_editor_v1": """你是网络编辑，专注于商业效果和读者体验。
+
+核心概念：爽点公式（压抑-释放/期待感悬置/欲扬先抑）、黄金三章（开篇冲突/悬念）、毒点规避（圣母/降智/节奏拖沓）。
+
+检查要点：爽点密度、情绪曲线、劝退风险、商业卖点。从市场和读者角度评估。""",
+    "chapter_splitter_v1": """你是章节拆分师，负责将卷纲/故事方向拆解为具体章节目录。
+
+每章输出：章号、标题、核心事件（一句话概括）、情绪基调、衔接说明、关键人物、视角建议。每次拆分5-15章，确保章间因果链衔接自然。""",
+    "discussion_summarizer_v1": """你是讨论总结师，负责在群聊中总结提炼。
+
+职责：提炼共识（哪些已达成一致）、标注分歧（哪些还有不同意见）、格式化输出（保持结构化）。不提出新观点，只收束已有讨论。输出用「共识」「分歧」「建议」三个小节。""",
+}
+
+
+@router.get("/experts/{expert_id}/prompt")
+async def get_expert_prompt(expert_id: str):
+    """获取专家的 prompt 内容"""
+    # 先查内置
+    if expert_id in BUILTIN_PROMPTS:
+        return {"expert_id": expert_id, "prompt": BUILTIN_PROMPTS[expert_id], "type": "builtin"}
+    # 再查自定义
+    fp = CUSTOM_EXPERTS_DIR / f"{expert_id}.json"
+    if fp.exists():
+        data = json.loads(fp.read_text(encoding="utf-8"))
+        return {"expert_id": expert_id, "prompt": data.get("prompt_template", ""), "type": "custom"}
+    raise HTTPException(status_code=404, detail="Expert not found")
+
+
 @router.get("/experts")
 async def list_experts():
     from backend.core.registry import list_modules
@@ -96,6 +149,7 @@ async def list_experts():
                     "label": data.get("name", data["id"]),
                     "icon": data.get("icon", "📄"),
                     "desc": data.get("description", ""),
+                    "prompt_template": data.get("prompt_template", ""),
                     "builtin": False
                 }
             except Exception:
@@ -148,19 +202,17 @@ async def delete_custom_expert(expert_id: str):
 
 def _register_custom_expert(expert_id: str, expert_data: dict):
     """动态注册自定义专家到 registry"""
-    from backend.core.protocols.expert import BaseExpert, ExpertOpinion
+    from backend.core.protocols.expert import BaseConfigurableExpert, ExpertOpinion
+    from backend.modules.experts import ROLE_INSTRUCTIONS
     
-    class DynamicCustomExpert(BaseExpert):
-        _id = expert_id
-        _data = expert_data
-        
+    class DynamicCustomExpert(BaseConfigurableExpert):
         @property
         def expert_id(self) -> str:
-            return self._id
+            return expert_id
         
         @property
         def expert_type(self) -> str:
-            return self._data.get("name", self._id)
+            return expert_data.get("name", expert_id)
         
         def speak(self, outline, context: dict) -> ExpertOpinion:
             from backend.core.config import get_config
@@ -170,7 +222,8 @@ def _register_custom_expert(expert_id: str, expert_data: dict):
             llm_cls = get_module("llm", config.llm.primary)
             llm = llm_cls()
             
-            template = self._data.get("prompt_template", "")
+            template = expert_data.get("prompt_template", "")
+            role_hint = ROLE_INSTRUCTIONS.get(self._role, "")
             
             vision = context.get("vision", {})
             vision_text = ""
@@ -193,19 +246,20 @@ def _register_custom_expert(expert_id: str, expert_data: dict):
                     for op in history[-3:]
                 ])
             
-            prompt = template.replace("{vision}", vision_text)\
-                             .replace("{worldbook}", worldbook)\
-                             .replace("{author_proposal}", author_proposal)\
-                             .replace("{reader_opinion}", reader_opinion)\
-                             .replace("{user_feedback}", user_feedback)\
-                             .replace("{history}", history_text)\
-                             .replace("{custom_prompt}", custom_prompt)
+            prompt = f"{role_hint}\n\n{template}"\
+                .replace("{vision}", vision_text)\
+                .replace("{worldbook}", worldbook)\
+                .replace("{author_proposal}", author_proposal)\
+                .replace("{reader_opinion}", reader_opinion)\
+                .replace("{user_feedback}", user_feedback)\
+                .replace("{history}", history_text)\
+                .replace("{custom_prompt}", custom_prompt)
             
             content = llm.invoke(prompt, temperature=0.8)
             
             return ExpertOpinion(
-                expert_id=self._id,
-                expert_type=self._data.get("name", self._id),
+                expert_id=expert_id,
+                expert_type=expert_data.get("name", expert_id),
                 content=content,
                 suggestions=[]
             )
@@ -246,7 +300,7 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
         vision = json.load(f)
 
     expert_configs = [
-        ExpertConfig(expert_id=e.expert_id, role=ExpertRole(e.role), custom_prompt=e.custom_prompt, container_id=e.container_id)
+        ExpertConfig(expert_id=e.expert_id, role=ExpertRole(e.role), custom_prompt=e.custom_prompt, container_id=e.container_id, interrupt_mode=e.interrupt_mode, interrupt_threshold=e.interrupt_threshold)
         for e in request.experts
     ]
 
@@ -259,6 +313,8 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
             context_layers=c.context_layers,
             context_tokens=c.context_tokens,
             repeat=c.repeat,
+            interrupt_mode=c.interrupt_mode,
+            interrupt_threshold=c.interrupt_threshold,
             exit_mode=c.exit_mode,
             exit_ratio=c.exit_ratio,
             exit_gatekeeper=c.exit_gatekeeper,

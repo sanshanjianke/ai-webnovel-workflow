@@ -435,11 +435,22 @@ const saveContent = async () => {
   }
 }
 
+const MENU_HEIGHTS = { doc: 220, dir: 140 }
+
+function calcMenuPos(event, type) {
+  const h = MENU_HEIGHTS[type] || 200
+  return {
+    x: event.clientX,
+    y: event.clientY + h > window.innerHeight ? event.clientY - h : event.clientY
+  }
+}
+
 const showDocContext = (event, doc) => {
+  const pos = calcMenuPos(event, 'doc')
   contextMenu.value = {
     show: true,
-    x: event.clientX,
-    y: event.clientY,
+    x: pos.x,
+    y: pos.y,
     type: 'doc',
     item: doc
   }
@@ -447,10 +458,11 @@ const showDocContext = (event, doc) => {
 }
 
 const showDirContext = (event, dir) => {
+  const pos = calcMenuPos(event, 'dir')
   contextMenu.value = {
     show: true,
-    x: event.clientX,
-    y: event.clientY,
+    x: pos.x,
+    y: pos.y,
     type: 'dir',
     item: dir
   }

@@ -332,8 +332,42 @@ class MeetingEngine:
                         if self._container_rounds[container_id] >= container.repeat:
                             self._container_exit_requested.add(container_id)
 
-            # 半自动：等用户反馈
-            if self.config.collaboration_mode in ("semi_auto", "manual") and human_feedback:
+            # 中断判定：根据专家/容器配置决定是否暂停等用户
+            interrupt_mode = "every_n_msgs"
+            interrupt_threshold = 1
+            if expert_config and expert_config.interrupt_mode:
+                interrupt_mode = expert_config.interrupt_mode
+                interrupt_threshold = expert_config.interrupt_threshold or 1
+            if container_id:
+                container = self._container_map.get(container_id)
+                if container and container.interrupt_mode:
+                    interrupt_mode = container.interrupt_mode
+                    interrupt_threshold = container.interrupt_threshold or 1
+
+            should_pause = False
+            if interrupt_mode == "auto":
+                should_pause = False
+            elif interrupt_mode == "on_mention":
+                should_pause = "@主编" in opinion.content or "@用户" in opinion.content
+            elif interrupt_mode == "every_n_msgs":
+                # 计数此容器内已连续发言次数
+                key = f"{container_id or 'solo'}_msgs"
+                count = getattr(self, '_interrupt_counts', {}).get(key, 0) + 1
+                if not hasattr(self, '_interrupt_counts'): self._interrupt_counts = {}
+                self._interrupt_counts[key] = count
+                should_pause = count >= interrupt_threshold
+                if should_pause:
+                    self._interrupt_counts[key] = 0
+            elif interrupt_mode == "every_n_tokens":
+                key = f"{container_id or 'solo'}_tokens"
+                count = getattr(self, '_interrupt_token_counts', {}).get(key, 0) + len(opinion.content)
+                if not hasattr(self, '_interrupt_token_counts'): self._interrupt_token_counts = {}
+                self._interrupt_token_counts[key] = count
+                should_pause = count >= interrupt_threshold
+                if should_pause:
+                    self._interrupt_token_counts[key] = 0
+
+            if should_pause and human_feedback:
                 yield {"type": "waiting_user", "speech_count": self._speech_count}
                 feedback = human_feedback()
                 if feedback:

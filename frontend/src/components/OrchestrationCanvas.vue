@@ -22,6 +22,7 @@
             class="toolbox-item"
             draggable="true"
             @dragstart="onDragStart($event, id, expert)"
+            @contextmenu.prevent.stop="showExpertContext($event, id, expert, true)"
           >
             <span class="expert-icon">{{ expert.icon }}</span>
             <div class="expert-info">
@@ -40,6 +41,7 @@
             class="toolbox-item custom-item"
             draggable="true"
             @dragstart="onDragStart($event, id, expert)"
+            @contextmenu.prevent.stop="showExpertContext($event, id, expert, false)"
           >
             <span class="expert-icon">{{ expert.icon }}</span>
             <div class="expert-info">
@@ -51,7 +53,11 @@
           <div v-if="Object.keys(customExperts).length === 0" class="hint" style="padding:6px 10px;">
             暂无自定义专家
           </div>
-          <button class="btn-create-expert" @click="showCreateModal = true">+ 创建专家</button>
+          <div style="display:flex;gap:4px;margin:4px 2px;">
+            <button class="btn-create-expert" @click="showCreateModal = true">+ 创建</button>
+            <button class="btn-create-expert" @click="triggerImportExpert">+ 导入</button>
+          </div>
+          <input ref="importInput" type="file" accept=".json,.yaml,.yml" @change="handleImportExpert" style="display:none" />
         </div>
       </div>
 
@@ -119,6 +125,21 @@
         <div class="config-field">
           <label>重复次数（1=不循环，提及驱动模式忽略此项）</label>
           <input v-model.number="containerCfg.repeat" type="number" min="1" max="100" @change="onContainerChange" :disabled="containerCfg.speaking_mode === 'mention_driven'" />
+        </div>
+
+        <div class="config-field">
+          <label>中断模式（覆盖容器内专家）</label>
+          <select v-model="containerCfg.interrupt_mode" @change="onContainerChange">
+            <option :value="null">不覆盖</option>
+            <option value="auto">全自动</option>
+            <option value="every_n_msgs">每 N 楼暂停</option>
+            <option value="every_n_tokens">每 N token 暂停</option>
+            <option value="on_mention">@ 主编时暂停</option>
+          </select>
+        </div>
+        <div class="config-field" v-if="containerCfg.interrupt_mode && containerCfg.interrupt_mode !== 'auto' && containerCfg.interrupt_mode !== 'on_mention'">
+          <label>阈值</label>
+          <input v-model.number="containerCfg.interrupt_threshold" type="number" min="1" max="1000" @change="onContainerChange" />
         </div>
 
         <div class="config-section">
@@ -228,6 +249,19 @@
           <label>自定义 prompt</label>
           <textarea v-model="customPrompt" placeholder="可选，额外指令" rows="3" @change="onConfigChange"></textarea>
         </div>
+        <div class="config-field">
+          <label>中断模式</label>
+          <select :value="selectedNode.data.interrupt_mode || 'every_n_msgs'" @change="setInterrupt('mode', $event.target.value)">
+            <option value="auto">全自动（不暂停）</option>
+            <option value="every_n_msgs">每 N 楼暂停</option>
+            <option value="every_n_tokens">每 N token 暂停</option>
+            <option value="on_mention">专家 @ 主编时暂停</option>
+          </select>
+        </div>
+        <div class="config-field" v-if="(selectedNode.data.interrupt_mode || 'every_n_msgs') !== 'auto' && (selectedNode.data.interrupt_mode || 'every_n_msgs') !== 'on_mention'">
+          <label>阈值</label>
+          <input :value="selectedNode.data.interrupt_threshold || 1" @change="setInterrupt('threshold', $event.target.value)" type="number" min="1" max="1000" />
+        </div>
         <div class="config-actions">
           <button class="btn btn-danger btn-sm" @click="removeNode">删除节点</button>
         </div>
@@ -240,19 +274,6 @@
           <div class="config-field">
             <label>会议名称</label>
             <input v-model="meetingName" placeholder="专家会议" />
-          </div>
-        </div>
-        <div class="order-list">
-          <h4 style="margin-top: 12px;">发言顺序</h4>
-          <div v-if="orderedNodes.length === 0" class="hint">
-            从左侧拖拽专家到画布，连线定义顺序
-          </div>
-          <div v-for="(node, idx) in orderedNodes" :key="node.id + '-' + idx" class="order-item">
-            <span class="order-num">{{ idx + 1 }}</span>
-            <span class="order-icon">{{ getExpertIcon(node) }}</span>
-            <span class="order-label">{{ node.data.label }}</span>
-            <span class="order-role">({{ node.data.role }})</span>
-            <span v-if="node.containerName" class="order-container">「{{ node.containerName }}」</span>
           </div>
         </div>
         <button class="btn btn-primary btn-run" @click="runMeeting" :disabled="orderedNodes.length === 0">
@@ -299,11 +320,68 @@
         </div>
       </div>
     </div>
+
+    <!-- ── 专家右键菜单 ── -->
+    <div v-if="expertCtx.show" class="context-menu" :style="{ top: expertCtx.y + 'px', left: expertCtx.x + 'px' }" @click.stop>
+      <div class="menu-items">
+        <div @click="viewExpert">查看详情</div>
+        <template v-if="!expertCtx.isBuiltin">
+          <div @click="editExpert">编辑</div>
+          <div class="menu-danger" @click="deleteCtxExpert">删除</div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ── 查看专家弹窗 ── -->
+    <div v-if="showViewExpert" class="modal-overlay" @click.self="showViewExpert = false">
+      <div class="modal-content card">
+        <h2>{{ viewExpertData.icon }} {{ viewExpertData.name }}</h2>
+        <p class="expert-desc-label">{{ viewExpertData.desc }}</p>
+        <div class="form-group">
+          <label>ID</label>
+          <input :value="viewExpertData.id" disabled />
+        </div>
+        <div class="form-group">
+          <label>Prompt 模板</label>
+          <pre class="expert-prompt-preview">{{ viewExpertData.prompt }}</pre>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" @click="showViewExpert = false">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 编辑专家弹窗 ── -->
+    <div v-if="showEditExpert" class="modal-overlay" @click.self="showEditExpert = false">
+      <div class="modal-content card">
+        <h2>编辑专家</h2>
+        <div class="form-group">
+          <label>名称</label>
+          <input v-model="editExpertData.name" />
+        </div>
+        <div class="form-group">
+          <label>图标</label>
+          <input v-model="editExpertData.icon" maxlength="4" />
+        </div>
+        <div class="form-group">
+          <label>描述</label>
+          <input v-model="editExpertData.description" />
+        </div>
+        <div class="form-group">
+          <label>Prompt 模板</label>
+          <textarea v-model="editExpertData.prompt_template" rows="8"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-primary" @click="saveEditExpert">保存</button>
+          <button class="btn" @click="showEditExpert = false">取消</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, markRaw, onMounted, watch } from 'vue'
+import { ref, reactive, computed, markRaw, onMounted, onUnmounted, watch } from 'vue'
 import { VueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -335,6 +413,7 @@ const loadStatus = ref('')
 const draggingOverCanvas = ref(false)
 const showCreateModal = ref(false)
 const customPrompt = ref('')
+const importInput = ref(null)
 
 const customExperts = ref({})
 
@@ -346,11 +425,17 @@ const newExpert = reactive({
   prompt_template: ''
 })
 
+const expertCtx = reactive({ show: false, x: 0, y: 0, id: '', data: null, isBuiltin: true })
+const showViewExpert = ref(false)
+const viewExpertData = reactive({ id: '', name: '', icon: '', desc: '', prompt: '' })
+const showEditExpert = ref(false)
+const editExpertData = reactive({ id: '', name: '', icon: '', description: '', prompt_template: '' })
+
 const containerCfg = reactive({
   name: '容器', concurrency: 'serial', speaking_mode: 'ordered',
   use_layers: false, context_layers: null,
   use_tokens: false, context_tokens: null,
-  repeat: 1,
+      repeat: 1, interrupt_mode: null, interrupt_threshold: 1,
   exit_mode: 'manual', exit_ratio: 0.6, exit_gatekeeper: null, exit_max_speeches: 20,
   worldbook_bindings: '', rag_bindings: ''
 })
@@ -406,7 +491,14 @@ function getAllExperts() {
   return { ...availableExperts, ...customExperts.value }
 }
 
-onMounted(() => { fetchCustomExperts() })
+onMounted(() => {
+  fetchCustomExperts()
+  document.addEventListener('click', hideExpertContext)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', hideExpertContext)
+})
 
 async function fetchCustomExperts() {
   try {
@@ -449,18 +541,138 @@ async function saveDesign() {
 }
 
 async function createCustomExpert() {
+  if (!newExpert.id || !newExpert.name) return
   try {
-    await axios.post('/api/experts/custom', { ...newExpert })
+    const payload = {
+      id: newExpert.id,
+      name: newExpert.name,
+      icon: newExpert.icon,
+      description: newExpert.description,
+      prompt_template: newExpert.prompt_template
+    }
+    await axios.post('/api/experts/custom', payload)
     await fetchCustomExperts()
     showCreateModal.value = false
     Object.assign(newExpert, { id: '', name: '', icon: '📄', description: '', prompt_template: '' })
-  } catch (e) { alert(e.response?.data?.detail || '创建失败') }
+  } catch (e) {
+    console.error('Create expert failed:', e)
+    alert(e.response?.data?.detail || '创建失败')
+  }
 }
 
 async function deleteCustomExpert(id) {
   if (!confirm('确定删除此自定义专家？')) return
   try { await axios.delete(`/api/experts/custom/${id}`); await fetchCustomExperts() }
   catch (e) { alert('删除失败') }
+}
+
+// ── 专家右键菜单 ──
+
+function showExpertContext(event, id, expert, isBuiltin) {
+  expertCtx.show = true
+  expertCtx.x = event.clientX
+  expertCtx.y = event.clientY
+  expertCtx.id = id
+  expertCtx.data = expert
+  expertCtx.isBuiltin = isBuiltin
+}
+
+function hideExpertContext() {
+  expertCtx.show = false
+}
+
+async function viewExpert() {
+  hideExpertContext()
+  const id = expertCtx.id
+  try {
+    const res = await axios.get(`/api/experts/${id}/prompt`)
+    viewExpertData.id = id
+    viewExpertData.name = expertCtx.data.label
+    viewExpertData.icon = expertCtx.data.icon
+    viewExpertData.desc = expertCtx.data.desc
+    viewExpertData.prompt = res.data.prompt || '（无 prompt 内容）'
+  } catch (e) {
+    viewExpertData.id = id
+    viewExpertData.name = expertCtx.data.label
+    viewExpertData.icon = expertCtx.data.icon
+    viewExpertData.desc = expertCtx.data.desc
+    viewExpertData.prompt = '（无法获取 prompt）'
+  }
+  showViewExpert.value = true
+}
+
+async function editExpert() {
+  hideExpertContext()
+  const id = expertCtx.id
+  try {
+    const res = await axios.get(`/api/experts/${id}/prompt`)
+    const info = (await axios.get('/api/experts')).data.custom_experts[id] || {}
+    editExpertData.id = id
+    editExpertData.name = info.label || expertCtx.data.label
+    editExpertData.icon = info.icon || expertCtx.data.icon
+    editExpertData.description = info.desc || ''
+    editExpertData.prompt_template = res.data.prompt || ''
+    showEditExpert.value = true
+  } catch (e) { console.error('Edit expert failed:', e) }
+}
+
+async function saveEditExpert() {
+  const fn = `data/user/custom_experts/${editExpertData.id}.json`
+  const payload = {
+    id: editExpertData.id,
+    name: editExpertData.name,
+    icon: editExpertData.icon,
+    description: editExpertData.description,
+    prompt_template: editExpertData.prompt_template
+  }
+  // Update via reload: delete old registration, write file, re-register
+  try {
+    await axios.delete(`/api/experts/custom/${editExpertData.id}`)
+    await axios.post('/api/experts/custom', payload)
+    await fetchCustomExperts()
+    showEditExpert.value = false
+  } catch (e) {
+    console.error('Save expert failed:', e)
+    alert('保存失败')
+  }
+}
+
+function deleteCtxExpert() {
+  hideExpertContext()
+  deleteCustomExpert(expertCtx.id)
+}
+
+function triggerImportExpert() {
+  importInput.value?.click()
+}
+
+async function handleImportExpert(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  try {
+    const text = await file.text()
+    let data
+    if (file.name.endsWith('.json')) {
+      data = JSON.parse(text)
+    } else {
+      // rough yaml parse: just split key: value
+      data = {}
+      for (const line of text.split('\n')) {
+        const m = line.match(/^(\w+):\s*(.+)/)
+        if (m) data[m[1]] = m[2].trim()
+      }
+    }
+    if (!data.id || !data.name) { alert('导入文件需包含 id 和 name'); return }
+    data.prompt_template = data.prompt_template || data.prompt || ''
+    data.icon = data.icon || '📄'
+    data.description = data.description || ''
+    await axios.post('/api/experts/custom', data)
+    await fetchCustomExperts()
+  } catch (e) {
+    console.error('Import expert failed:', e)
+    alert('导入失败：' + (e.response?.data?.detail || e.message))
+  }
+  event.target.value = ''
 }
 
 function loadPreset(key) {
@@ -579,6 +791,13 @@ function setTrigger(field, value) {
   }
 }
 
+function setInterrupt(field, value) {
+  if (selectedNode.value && selectedNode.value.type === 'expert') {
+    if (field === 'mode') selectedNode.value.data.interrupt_mode = value
+    if (field === 'threshold') selectedNode.value.data.interrupt_threshold = parseInt(value) || 1
+  }
+}
+
 function getExpertIcon(node) {
   if (!node || !node.data) return '📄'
   const icons = { '资深作者': '📕', '读者代表': '📙', '剧情架构师': '🏛', '人物设计师': '🎭', '网络编辑': '💼' }
@@ -596,6 +815,8 @@ function onContainerChange() {
     selectedNode.value.data.context_layers = containerCfg.use_layers ? (containerCfg.context_layers || 3) : null
     selectedNode.value.data.context_tokens = containerCfg.use_tokens ? (containerCfg.context_tokens || 100000) : null
     selectedNode.value.data.repeat = containerCfg.repeat
+    selectedNode.value.data.interrupt_mode = containerCfg.interrupt_mode
+    selectedNode.value.data.interrupt_threshold = containerCfg.interrupt_threshold
     selectedNode.value.data.exit_mode = containerCfg.exit_mode
     selectedNode.value.data.exit_ratio = containerCfg.exit_ratio
     selectedNode.value.data.exit_gatekeeper = containerCfg.exit_gatekeeper
@@ -617,6 +838,8 @@ function loadContainerConfig(node) {
   containerCfg.use_tokens = node.data.context_tokens != null
   containerCfg.context_tokens = node.data.context_tokens ?? null
   containerCfg.repeat = node.data.repeat || 1
+  containerCfg.interrupt_mode = node.data.interrupt_mode ?? null
+  containerCfg.interrupt_threshold = node.data.interrupt_threshold || 1
   containerCfg.exit_mode = node.data.exit_mode || 'manual'
   containerCfg.exit_ratio = node.data.exit_ratio ?? 0.6
   containerCfg.exit_gatekeeper = node.data.exit_gatekeeper ?? null
@@ -645,17 +868,22 @@ const orderedNodes = computed(() => {
   const queue = expertNodes.filter(n => (inDegree[n.id] || 0) === 0)
   const result = []
   while (queue.length > 0) {
-    const current = queue.shift()
-    const container = nodes.value.find(n => n.id === current.parentNode && n.type === 'container')
-    const isMentionDriven = container && container.data.speaking_mode === 'mention_driven'
-    const repeat = isMentionDriven ? 1 : (container ? (container.data.repeat || 1) : 1)
-    const containerName = container ? container.data.name : null
-    for (let i = 0; i < repeat; i++) {
-      result.push({ ...current, containerName, loopIteration: repeat > 1 ? i + 1 : 0 })
+    const level = [...queue]
+    queue.length = 0
+    for (const current of level) {
+      const container = nodes.value.find(n => n.id === current.parentNode && n.type === 'container')
+      const isMentionDriven = container && container.data.speaking_mode === 'mention_driven'
+      const repeat = isMentionDriven ? 1 : (container ? (container.data.repeat || 1) : 1)
+      const containerName = container ? container.data.name : null
+      for (let i = 0; i < repeat; i++) {
+        result.push({ ...current, containerName, loopIteration: repeat > 1 ? i + 1 : 0 })
+      }
     }
-    for (const target of (outEdges[current.id] || [])) {
-      inDegree[target]--
-      if (inDegree[target] === 0) queue.push(nodeMap[target])
+    for (const current of level) {
+      for (const target of (outEdges[current.id] || [])) {
+        inDegree[target]--
+        if (inDegree[target] === 0) queue.push(nodeMap[target])
+      }
     }
   }
   return result.length >= expertNodes.length ? result : expertNodes.map(n => {
@@ -670,6 +898,8 @@ function runMeeting() {
     role: node.data.role || 'main',
     custom_prompt: node.data.customPrompt || null,
     container_id: node.parentNode || null,
+    interrupt_mode: node.data.interrupt_mode || 'every_n_msgs',
+    interrupt_threshold: node.data.interrupt_threshold || 1,
     loop_iteration: node.loopIteration || 0
   }))
 
@@ -683,6 +913,8 @@ function runMeeting() {
       context_layers: n.data.context_layers ?? null,
       context_tokens: n.data.context_tokens ?? null,
       repeat: n.data.repeat || 1,
+      interrupt_mode: n.data.interrupt_mode ?? null,
+      interrupt_threshold: n.data.interrupt_threshold || 1,
       exit_mode: n.data.exit_mode || 'manual',
       exit_ratio: n.data.exit_ratio ?? 0.6,
       exit_gatekeeper: n.data.exit_gatekeeper ?? null,
@@ -758,7 +990,7 @@ function addContainer() {
       name: '容器', label: '容器', icon: '📦',
       concurrency: 'serial', speaking_mode: 'ordered',
       context_layers: null, context_tokens: null,
-      repeat: 1,
+  repeat: 1, interrupt_mode: null, interrupt_threshold: 1,
       exit_mode: 'manual', exit_ratio: 0.6, exit_gatekeeper: null, exit_max_speeches: 20,
       worldbook_bindings: [], rag_bindings: [],
       children: [], width: 520, height: 280
@@ -891,4 +1123,27 @@ function onPaneClick() {
 .vars-hint code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; font-size: 0.7rem; }
 .modal-actions { display: flex; gap: 8px; margin-top: 1rem; }
 .modal-actions .btn { flex: 1; }
+
+.context-menu {
+  position: fixed;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  z-index: 1000;
+  min-width: 120px;
+}
+.menu-items > div {
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+.menu-items > div:hover { background: #f0f0f0; }
+.menu-danger { color: #e74c3c; }
+.expert-desc-label { color: #666; font-size: 0.85rem; margin: 0 0 1rem 0; }
+.expert-prompt-preview {
+  background: #f8f9fa; padding: 0.75rem; border-radius: 4px;
+  font-family: monospace; font-size: 0.8rem; white-space: pre-wrap;
+  max-height: 200px; overflow-y: auto; margin: 0;
+}
 </style>
