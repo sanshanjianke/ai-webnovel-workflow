@@ -61,12 +61,8 @@ class ContainerConfigRequest(BaseModel):
 
 class MeetingStartRequest(BaseModel):
     meeting_name: str = "专家会议"
-    granularity: Literal["volume", "chapter", "scene"] = "chapter"
     experts: list[ExpertConfigRequest]
     containers: list[ContainerConfigRequest] = []
-    collaboration_mode: Literal["semi_auto", "full_auto", "manual"] = "semi_auto"
-    max_rounds: int = 3
-    max_speeches: int = 0
 
 
 class MeetingFeedback(BaseModel):
@@ -273,12 +269,12 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
 
     meeting_config = MeetingConfig(
         meeting_name=request.meeting_name,
-        granularity=Granularity(request.granularity),
+        granularity=Granularity("chapter"),
         experts=expert_configs,
         containers=container_configs,
-        collaboration_mode=request.collaboration_mode,
-        max_rounds=request.max_rounds,
-        max_speeches=request.max_speeches
+        collaboration_mode="semi_auto",
+        max_rounds=3,
+        max_speeches=0
     )
 
     logger = MeetingLogger(project.project_path / "logs" / "meeting.db")

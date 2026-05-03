@@ -11,13 +11,25 @@
       <div class="meeting-header">
         <button class="btn btn-outline" @click="backToCanvas">← 返回编排</button>
         <h2>{{ meetingConfig.meeting_name || '专家会议' }}</h2>
-        <span class="granularity-badge">{{ meetingConfig.granularity }}</span>
       </div>
 
       <div class="meeting-layout">
         <div class="chat-area">
-          <div class="messages" ref="messagesContainer">
-            <div v-for="(msg, idx) in messages" :key="idx"
+          <!-- 聊天标签栏 -->
+          <div class="chat-tabs" v-if="chatGroups.length > 1">
+            <button 
+              v-for="g in chatGroups" :key="g.key"
+              :class="['chat-tab', { active: activeChat === g.key }]"
+              @click="activeChat = g.key"
+            >
+              <span class="tab-icon">{{ g.icon }}</span>
+              <span class="tab-name">{{ g.name }}</span>
+              <span class="tab-badge" v-if="g.unread > 0">{{ g.unread }}</span>
+            </button>
+          </div>
+
+          <div class="messages" ref="messagesContainers">
+            <div v-for="(msg, idx) in activeMessages" :key="idx"
               :class="['message', msg.type, ...expertClass(msg)]">
               <div class="message-header">
                 <span class="expert-icon">{{ getIcon(msg) }}</span>
@@ -28,7 +40,7 @@
             </div>
           </div>
 
-          <div class="input-area" v-if="isRunning && isSemiAuto">
+          <div class="input-area" v-if="isRunning">
             <textarea v-model="userInput" placeholder="输入意见，或用 @专家名 点名..."></textarea>
             <div class="input-actions">
               <button class="btn btn-success" @click="sendFeedback('approve')">通过 ✓</button>
@@ -52,8 +64,7 @@
           <div class="card">
             <h3>会议信息</h3>
             <p>状态: {{ isRunning ? '运行中' : '已完成' }}</p>
-            <p>发言次数: {{ speechCount }} / {{ meetingConfig.max_speeches || '∞' }}</p>
-            <p>协作模式: {{ meetingConfig.collaboration_mode }}</p>
+            <p>发言次数: {{ speechCount }}</p>
           </div>
 
           <div class="card">
@@ -62,6 +73,7 @@
               <span class="queue-num">{{ idx + 1 }}</span>
               <span>{{ getExpertLabel(exp.expert_id) }}</span>
               <span class="queue-role">({{ exp.role }})</span>
+              <span class="queue-container" v-if="exp.container_id">📦</span>
             </div>
           </div>
 
@@ -76,7 +88,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, reactive, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
 import { useRoute } from 'vue-router'
 import OrchestrationCanvas from '../components/OrchestrationCanvas.vue'
@@ -86,29 +98,57 @@ const projectId = computed(() => route.query.projectId || '')
 
 const md = new MarkdownIt()
 const viewMode = ref('canvas')
-const messages = ref([])
 const userInput = ref('')
 const currentRound = ref(0)
 const speechCount = ref(0)
 const isRunning = ref(false)
 const meetingOutput = ref(null)
-const messagesContainer = ref(null)
+const messagesContainers = ref(null)
+const activeChat = ref('solo')
+const readMessages = reactive({})
+
 let eventSource = null
 
 const meetingConfig = ref({
   meeting_name: '专家会议',
-  granularity: 'chapter',
   experts: [],
-  collaboration_mode: 'semi_auto',
-  max_rounds: 3,
-  max_speeches: 0
+  containers: []
 })
 
-const isSemiAuto = computed(() => meetingConfig.value.collaboration_mode === 'semi_auto')
 const callExpertId = ref('')
+
+// 按容器分组的消息
+const messagesByContainer = reactive({})
+
+// 容器信息缓存
+const containerInfo = ref({})
+
+const chatGroups = computed(() => {
+  const groups = []
+  // 容器群聊
+  for (const c of (meetingConfig.value.containers || [])) {
+    const key = c.container_id
+    const msgs = messagesByContainer[key] || []
+    const unread = readMessages[key] != null ? msgs.filter((_, i) => i > (readMessages[key] || -1)).length : 0
+    groups.push({ key, name: c.name || '容器', icon: '📦', unread })
+  }
+  // 未归属专家（solo）
+  const soloMsgs = messagesByContainer['solo'] || []
+  if (soloMsgs.length > 0 || groups.length === 0) {
+    const unread = readMessages['solo'] != null ? soloMsgs.filter((_, i) => soloMsgs.length - 1 > (readMessages['solo'] || 0)).length : 0
+    groups.unshift({ key: 'solo', name: '主聊天', icon: '💬', unread })
+  }
+  return groups
+})
+
+const activeMessages = computed(() => messagesByContainer[activeChat.value] || [])
 
 function onCanvasRun(config) {
   meetingConfig.value = config
+  containerInfo.value = {}
+  for (const c of config.containers || []) {
+    containerInfo.value[c.container_id] = { name: c.name, chat_mode: 'group' }
+  }
   viewMode.value = 'meeting'
   startMeeting()
 }
@@ -122,13 +162,37 @@ function backToCanvas() {
   viewMode.value = 'canvas'
 }
 
+function routeMessage(msg) {
+  const cid = msg.container_id || 'solo'
+  if (!messagesByContainer[cid]) messagesByContainer[cid] = []
+  messagesByContainer[cid].push(msg)
+
+  // 自动切换标签到有新消息的聊天
+  if (!isRunning.value || activeChat.value === cid) {
+    markRead(cid)
+  }
+}
+
+function markRead(cid) {
+  const msgs = messagesByContainer[cid]
+  if (msgs) readMessages[cid] = msgs.length - 1
+}
+
+watch(activeChat, (cid) => {
+  if (cid) markRead(cid)
+})
+
 async function startMeeting() {
-  messages.value = []
+  // 清空旧消息
+  for (const key of Object.keys(messagesByContainer)) delete messagesByContainer[key]
+  for (const key of Object.keys(readMessages)) delete readMessages[key]
+  activeChat.value = 'solo'
+
   currentRound.value = 0
   meetingOutput.value = null
   isRunning.value = true
 
-  const url = `/api/projects/${props.projectId}/meeting/start`
+  const url = `/api/projects/${projectId.value}/meeting/start`
 
   try {
     const response = await fetch(url, {
@@ -175,19 +239,16 @@ function handleSSEEvent(type, data) {
     case 'round_start':
       currentRound.value = data.round || data.round_num || (currentRound.value + 1)
       speechCount.value = data.speech_count || speechCount.value
-      messages.value.push({
+      routeMessage({
         type: 'system',
         content: `--- 第 ${currentRound.value} 轮 · ${speechCount.value} 次发言 ---`,
         timestamp: new Date().toISOString()
       })
       break
 
-    case 'expert_start':
-      break
-
     case 'expert_speak':
       speechCount.value = data.speech_count || speechCount.value
-      messages.value.push({
+      routeMessage({
         type: 'expert',
         expert_type: data.expert_type,
         content: data.content,
@@ -195,35 +256,36 @@ function handleSSEEvent(type, data) {
         timestamp: new Date().toISOString()
       })
       if (data.mention) {
-        messages.value.push({
+        routeMessage({
           type: 'system',
           content: `→ @${getExpertLabel(data.mention)} 被提及，接下来将点名发言`,
+          container_id: data.container_id,
           timestamp: new Date().toISOString()
         })
       }
       break
 
     case 'summarizer':
-      messages.value.push({
+      routeMessage({
         type: 'summarizer',
         expert_type: '讨论总结师',
         content: data.content,
         container_id: data.container_id,
-        container_name: data.container_name,
         timestamp: new Date().toISOString()
       })
       break
 
     case 'mention_detected':
-      messages.value.push({
+      routeMessage({
         type: 'system',
         content: `→ ${data.from} 点名了 @${getExpertLabel(data.to)}`,
+        container_id: data.container_id,
         timestamp: new Date().toISOString()
       })
       break
 
     case 'waiting_user':
-      messages.value.push({
+      routeMessage({
         type: 'system',
         content: `⏳ 等待决策（已发言 ${data.speech_count || speechCount.value} 次）`,
         timestamp: new Date().toISOString()
@@ -231,26 +293,28 @@ function handleSSEEvent(type, data) {
       break
 
     case 'user_call_expert':
-      messages.value.push({
+      routeMessage({
         type: 'system',
         content: `→ 主编点名 @${getExpertLabel(data.expert_id)}`,
+        container_id: data.container_id,
         timestamp: new Date().toISOString()
       })
       break
 
     case 'meeting_restarted':
-      messages.value.push({
+      routeMessage({
         type: 'system',
         content: '--- 会议已重开 ---',
         timestamp: new Date().toISOString()
       })
+      for (const key of Object.keys(messagesByContainer)) delete messagesByContainer[key]
       speechCount.value = 0
       currentRound.value = 0
       break
 
     case 'output_ready':
       meetingOutput.value = data.output
-      messages.value.push({
+      routeMessage({
         type: 'system',
         content: `会议完成！共 ${data.speech_count || 0} 次发言。`,
         timestamp: new Date().toISOString()
@@ -263,7 +327,7 @@ function handleSSEEvent(type, data) {
       break
 
     case 'user_feedback':
-      messages.value.push({
+      routeMessage({
         type: 'user',
         expert_type: '主编',
         content: `已处理: ${data.action || '操作'}`,
@@ -278,14 +342,14 @@ async function sendFeedback(action) {
   const message = action === 'modify' ? userInput.value : ''
   const body = { action, message }
   try {
-    await fetch(`/api/projects/${props.projectId}/meeting/feedback`, {
+    await fetch(`/api/projects/${projectId.value}/meeting/feedback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     })
 
     const labels = { approve: '同意继续', modify: '已发送意见', stop: '已停止', restart: '重新开始' }
-    messages.value.push({
+    routeMessage({
       type: 'user',
       expert_type: '主编',
       content: labels[action] || `操作: ${action}`,
@@ -301,12 +365,12 @@ async function sendFeedback(action) {
 async function callExpert() {
   if (!callExpertId.value) return
   try {
-    await fetch(`/api/projects/${props.projectId}/meeting/feedback`, {
+    await fetch(`/api/projects/${projectId.value}/meeting/feedback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'call_expert', expert_id: callExpertId.value })
     })
-    messages.value.push({
+    routeMessage({
       type: 'user',
       expert_type: '主编',
       content: `点名 @${getExpertLabel(callExpertId.value)}`,
@@ -321,9 +385,8 @@ async function callExpert() {
 
 async function scrollToBottom() {
   await nextTick()
-  if (messagesContainer.value) {
-    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
-  }
+  const el = document.querySelector('.chat-area .messages')
+  if (el) el.scrollTop = el.scrollHeight
 }
 
 function getIcon(msg) {
@@ -376,13 +439,6 @@ function formatTime(ts) {
   border-bottom: 1px solid #e0e0e0;
 }
 .meeting-header h2 { margin: 0; font-size: 1.1rem; }
-.granularity-badge {
-  background: #3498db;
-  color: white;
-  padding: 3px 10px;
-  border-radius: 12px;
-  font-size: 0.75rem;
-}
 
 .meeting-layout { flex: 1; display: flex; overflow: hidden; }
 
@@ -395,6 +451,47 @@ function formatTime(ts) {
   border-radius: 8px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
+
+.chat-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 6px 0 6px;
+  border-bottom: 1px solid #e0e0e0;
+  overflow-x: auto;
+}
+.chat-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.chat-tab:hover { background: #f5f5f5; }
+.chat-tab.active {
+  background: white;
+  border-color: #e0e0e0;
+  font-weight: 600;
+}
+.tab-icon { font-size: 0.9rem; }
+.tab-name { color: #333; }
+.tab-badge {
+  background: #e74c3c;
+  color: white;
+  border-radius: 10px;
+  padding: 0 6px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  min-width: 16px;
+  text-align: center;
+}
+
 .messages { flex: 1; overflow-y: auto; padding: 1rem; }
 .message {
   margin-bottom: 1rem;
@@ -483,6 +580,7 @@ function formatTime(ts) {
   font-size: 0.65rem;
 }
 .queue-role { color: #999; }
+.queue-container { font-size: 0.8rem; opacity: 0.5; margin-left: auto; }
 
 .output-preview {
   font-size: 0.8rem;

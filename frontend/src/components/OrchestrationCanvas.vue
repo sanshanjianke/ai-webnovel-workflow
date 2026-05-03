@@ -228,26 +228,6 @@
             <label>会议名称</label>
             <input v-model="meetingName" placeholder="专家会议" />
           </div>
-          <div class="config-field">
-            <label>粒度</label>
-            <select v-model="granularity">
-              <option value="volume">卷级</option>
-              <option value="chapter">章级</option>
-              <option value="scene">场景级</option>
-            </select>
-          </div>
-          <div class="config-field">
-            <label>协作模式</label>
-            <select v-model="collaborationMode">
-              <option value="semi_auto">半自动</option>
-              <option value="full_auto">全自动</option>
-              <option value="manual">手动</option>
-            </select>
-          </div>
-          <div class="config-field">
-            <label>最大发言次数（0=不限）</label>
-            <input v-model.number="maxSpeeches" type="number" min="0" max="100" />
-          </div>
         </div>
         <div class="order-list">
           <h4 style="margin-top: 12px;">发言顺序</h4>
@@ -337,14 +317,11 @@ const builtinOpen = ref(true)
 const customOpen = ref(true)
 
 const meetingName = ref('专家会议')
-const granularity = ref('chapter')
-const collaborationMode = ref('semi_auto')
-const maxSpeeches = ref(0)
-const customPrompt = ref('')
-const showCreateModal = ref(false)
 const saveStatus = ref('')
 const loadStatus = ref('')
 const draggingOverCanvas = ref(false)
+const showCreateModal = ref(false)
+const customPrompt = ref('')
 
 const customExperts = ref({})
 
@@ -389,12 +366,11 @@ const presets = [
 
 const presetConfigs = {
   quick_review: {
-    meeting_name: '快速审核', granularity: 'chapter', collaboration_mode: 'full_auto',
-    max_speeches: 3, experts: [{ expert_id: 'web_editor_v1', role: 'main' }]
+    meeting_name: '快速审核',
+    experts: [{ expert_id: 'web_editor_v1', role: 'main' }]
   },
   volume_planning: {
-    meeting_name: '卷纲编排', granularity: 'volume', collaboration_mode: 'semi_auto',
-    max_speeches: 9,
+    meeting_name: '卷纲编排',
     experts: [
       { expert_id: 'senior_author_v1', role: 'main' },
       { expert_id: 'reader_representative_v1', role: 'review' },
@@ -402,8 +378,7 @@ const presetConfigs = {
     ]
   },
   chapter_design: {
-    meeting_name: '章纲设计', granularity: 'chapter', collaboration_mode: 'semi_auto',
-    max_speeches: 9,
+    meeting_name: '章纲设计',
     experts: [
       { expert_id: 'plot_architect_v1', role: 'main' },
       { expert_id: 'web_editor_v1', role: 'review' },
@@ -429,8 +404,7 @@ async function saveDesign() {
   saveStatus.value = 'saving'
   try {
     const design = {
-      meeting_name: meetingName.value, granularity: granularity.value,
-      collaboration_mode: collaborationMode.value, max_speeches: maxSpeeches.value,
+      meeting_name: meetingName.value,
       nodes: nodes.value.map(n => ({
         id: n.id, type: n.type, position: n.position,
         parentNode: n.parentNode || null,
@@ -480,9 +454,6 @@ function loadPreset(key) {
   const preset = presetConfigs[key]
   if (!preset) return
   meetingName.value = preset.meeting_name
-  granularity.value = preset.granularity
-  collaborationMode.value = preset.collaboration_mode
-  maxSpeeches.value = preset.max_speeches || 0
   nodes.value = []; edges.value = []; nodeCounter = 0
   const allExperts = getAllExperts()
   let prevId = null
@@ -546,9 +517,6 @@ async function loadDesignByUid(uid) {
     if (!content || !content.nodes) { loadStatus.value = 'empty'; setTimeout(() => { loadStatus.value = '' }, 2000); return }
     loadStatus.value = 'loaded'; setTimeout(() => { loadStatus.value = '' }, 2000)
     meetingName.value = content.meeting_name || '专家会议'
-    granularity.value = content.granularity || 'chapter'
-    collaborationMode.value = content.collaboration_mode || 'semi_auto'
-    maxSpeeches.value = content.max_speeches || 0
     nodes.value = content.nodes.map(n => ({
       id: n.id, type: n.type || 'expert', position: n.position,
       parentNode: n.parentNode || null,
@@ -711,12 +679,8 @@ function runMeeting() {
 
   emit('run', {
     meeting_name: meetingName.value,
-    granularity: granularity.value,
     experts,
-    containers,
-    collaboration_mode: collaborationMode.value,
-    max_rounds: 3,
-    max_speeches: maxSpeeches.value
+    containers
   })
 }
 

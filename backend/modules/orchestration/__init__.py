@@ -520,33 +520,24 @@ class MeetingEngine:
 PRESET_CONFIGS = {
     "quick_review": {
         "meeting_name": "方案审核",
-        "granularity": "chapter",
         "experts": [
             {"expert_id": "web_editor_v1", "role": "main"},
-        ],
-        "collaboration_mode": "full_auto",
-        "max_speeches": 3
+        ]
     },
     "volume_planning": {
         "meeting_name": "卷纲编排",
-        "granularity": "volume",
         "experts": [
             {"expert_id": "senior_author_v1", "role": "main"},
             {"expert_id": "reader_representative_v1", "role": "review"},
             {"expert_id": "senior_author_v1", "role": "supplement"},
-        ],
-        "collaboration_mode": "semi_auto",
-        "max_speeches": 9
+        ]
     },
     "chapter_design": {
         "meeting_name": "章纲设计",
-        "granularity": "chapter",
         "experts": [
             {"expert_id": "plot_architect_v1", "role": "main"},
             {"expert_id": "web_editor_v1", "role": "review"},
             {"expert_id": "character_designer_v1", "role": "supplement"},
-        ],
-        "collaboration_mode": "semi_auto",
-        "max_speeches": 9
+        ]
     }
 }
