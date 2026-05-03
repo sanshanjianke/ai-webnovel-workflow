@@ -94,7 +94,7 @@
           <button class="toolbar-btn" @click="addPlaceholder('rag')" title="RAG节点">🔍</button>
           <button class="toolbar-btn" @click="addPlaceholder('splitter')" title="章节拆分师">✂️</button>
           <span class="toolbar-sep"></span>
-          <button class="toolbar-btn" @click="showQueuePanel = !showQueuePanel" :class="{ active: showQueuePanel }" title="输入源（批量.md文件）">📥 {{ queueFiles.length || '' }}</button>
+          <button class="toolbar-btn" @click="addInputSource" title="输入源节点（队列.md文件）">📥</button>
           <button class="toolbar-btn" @click="saveDesign" :disabled="!projectId || saveStatus === 'saving'" :title="saveStatus === 'saved' ? '已保存' : saveStatus === 'error' ? '保存失败' : '保存到文档库'">
             {{ saveStatus === 'saving' ? '⏳' : saveStatus === 'saved' ? '✅' : saveStatus === 'error' ? '❌' : '💾' }}
           </button>
@@ -394,23 +394,23 @@
     </div>
 
     <!-- ── 输入源队列面板 ── -->
-    <div class="queue-panel" v-if="showQueuePanel">
+    <div class="queue-panel" v-if="showQueuePanel && selectedNode && selectedNode.type === 'inputSource'">
       <div class="panel-header-row">
-        <h4>📥 输入源队列</h4>
+        <h4>📥 {{ selectedNode.data.label || '输入源' }} 队列</h4>
         <button class="btn-back" @click="showQueuePanel = false">✕</button>
       </div>
       <div class="queue-actions">
         <input ref="fileInput" type="file" accept=".md,.txt" multiple @change="onFilesSelected" style="display:none" />
         <button class="btn btn-sm" @click="$refs.fileInput.click()">+ 添加文件</button>
-        <button class="btn btn-sm" @click="queueFiles = []" :disabled="queueFiles.length === 0">清空</button>
+        <button class="btn btn-sm" @click="selectedNode.data.files = []" :disabled="!selectedNode.data.files || selectedNode.data.files.length === 0">清空</button>
         <button class="btn btn-sm" @click="addTextAsFile">📝 粘贴文本</button>
       </div>
-      <div class="queue-list" v-if="queueFiles.length > 0">
-        <div v-for="(f, i) in queueFiles" :key="i" class="queue-item">
+      <div class="queue-list" v-if="selectedNode.data.files && selectedNode.data.files.length > 0">
+        <div v-for="(f, i) in selectedNode.data.files" :key="i" class="queue-item">
           <span class="queue-idx">{{ i + 1 }}</span>
           <span class="queue-name">{{ f.name }}</span>
           <span class="queue-size">{{ (f.content.length / 1000).toFixed(1) }}KB</span>
-          <button class="btn-x" @click="queueFiles.splice(i, 1)" title="移除">✕</button>
+          <button class="btn-x" @click="selectedNode.data.files.splice(i, 1)" title="移除">✕</button>
         </div>
       </div>
       <div v-else class="queue-hint">添加 .md 文件到队列，管道将按序逐个处理</div>
@@ -430,6 +430,7 @@ import axios from 'axios'
 
 import ExpertNode from './ExpertNode.vue'
 import GroupNode from './GroupNode.vue'
+import InputSourceNode from './InputSourceNode.vue'
 
 const emit = defineEmits(['run'])
 const props = defineProps({
@@ -437,7 +438,7 @@ const props = defineProps({
   isRunning: { type: Boolean, default: false }
 })
 
-const nodeTypes = { expert: markRaw(ExpertNode), container: markRaw(GroupNode) }
+const nodeTypes = { expert: markRaw(ExpertNode), container: markRaw(GroupNode), inputSource: markRaw(InputSourceNode) }
 
 const nodes = ref([])
 const edges = ref([])
@@ -458,15 +459,17 @@ const customExperts = ref({})
 
 // ── 输入源队列 ──
 const showQueuePanel = ref(false)
-const queueFiles = ref([])  // [{ name, content }]
+const queueFiles = ref([])  // 兼容旧代码
 const fileInput = ref(null)
 
 function onFilesSelected(event) {
   const files = event.target.files
+  if (!selectedNode.value || selectedNode.value.type !== 'inputSource') return
+  if (!selectedNode.value.data.files) selectedNode.value.data.files = []
   for (const f of files) {
     const reader = new FileReader()
     reader.onload = (e) => {
-      queueFiles.value.push({ name: f.name, content: e.target.result })
+      selectedNode.value.data.files.push({ name: f.name, content: e.target.result })
     }
     reader.readAsText(f)
   }
@@ -474,10 +477,18 @@ function onFilesSelected(event) {
 }
 
 function addTextAsFile() {
+  if (!selectedNode.value || selectedNode.value.type !== 'inputSource') return
+  if (!selectedNode.value.data.files) selectedNode.value.data.files = []
   const text = prompt('粘贴 .md 文本内容：')
   if (text && text.trim()) {
-    const name = '粘贴文本_' + (queueFiles.value.length + 1) + '.md'
-    queueFiles.value.push({ name, content: text.trim() })
+    const name = '粘贴文本_' + (selectedNode.value.data.files.length + 1) + '.md'
+    selectedNode.value.data.files.push({ name, content: text.trim() })
+  }
+}
+
+function updateInputSourceHighlight() {
+  if (selectedNode.value && selectedNode.value.type === 'inputSource') {
+    selectedNode.value.data.selected = true
   }
 }
 
@@ -1010,7 +1021,7 @@ function runMeeting() {
     pipeline: true,
     experts,
     containers,
-    queue_files: queueFiles.value.map(f => f.content),
+    queue_files: inputSourceFiles(),
     edges: edges.value.filter(e => {
       const isInterContainer = nodes.value.some(n => 
         (n.type === 'container' && (e.source === n.id || e.target === n.id || 
@@ -1024,6 +1035,14 @@ function runMeeting() {
 function clearCanvas() {
   nodes.value = []; edges.value = []; selectedNode.value = null
   nodeCounter = 0; activePreset.value = 'custom'
+}
+
+function inputSourceFiles() {
+  const srcNode = nodes.value.find(n => n.type === 'inputSource')
+  if (srcNode && srcNode.data.files && srcNode.data.files.length > 0) {
+    return srcNode.data.files.map(f => f.content)
+  }
+  return []
 }
 
 // ── 容器子节点同步 ──
@@ -1071,14 +1090,24 @@ function addContainer() {
     data: {
       name: '容器', label: '容器', icon: '📦',
       concurrency: 'serial', speaking_mode: 'ordered',
+      repeat: 1, children: [], edges: [],
       context_layers: null, context_tokens: null,
-  repeat: 1, interrupt_mode: null, interrupt_threshold: 1,
+      interrupt_mode: null, interrupt_threshold: 1,
       exit_mode: 'manual', exit_ratio: 0.6, exit_gatekeeper: null, exit_max_speeches: 20,
       worldbook_bindings: [], rag_bindings: [],
-      children: [], width: 520, height: 280
     },
-    style: { zIndex: 0 }
+    style: { width: 280, zIndex: 4 }
   })
+}
+
+function addInputSource() {
+  const id = `input_${++nodeCounter}`
+  nodes.value.push({
+    id, type: 'inputSource', position: { x: 100, y: 300 },
+    data: { label: '输入源', files: [], selected: false },
+    style: { zIndex: 5 }
+  })
+  updateInputSourceHighlight()
 }
 
 function onNodeClick({ node }) {
@@ -1087,11 +1116,14 @@ function onNodeClick({ node }) {
     customPrompt.value = node.data.customPrompt || ''
   } else if (node.type === 'container') {
     loadContainerConfig(node)
+  } else if (node.type === 'inputSource') {
+    showQueuePanel.value = true
   }
 }
 
 function onPaneClick() {
   selectedNode.value = null
+  showQueuePanel.value = false
 }
 
 function onNodeDoubleClick({ node }) {
