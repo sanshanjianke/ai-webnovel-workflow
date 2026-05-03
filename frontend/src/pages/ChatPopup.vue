@@ -6,7 +6,7 @@
       <span class="popup-status stopped" v-else>已完成</span>
     </div>
     <div class="popup-body">
-      <div class="queue-sidebar" v-if="queueState.total > 1">
+      <div class="queue-sidebar" v-if="queueState.total >= 1">
         <div class="queue-sidebar-header">📥 队列</div>
         <div v-for="i in queueState.total" :key="i"
           :class="['queue-sidebar-item', {
