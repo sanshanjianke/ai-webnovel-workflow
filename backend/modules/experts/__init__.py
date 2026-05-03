@@ -1,7 +1,7 @@
 from backend.core.protocols.expert import BaseExpert, ExpertOpinion, BaseConfigurableExpert
 from backend.core.protocols.meeting import ExpertRole, Granularity
 from backend.core.registry import register_module
-from typing import Optional
+from typing import Optional, Iterator, Tuple, Union
 
 
 # ── Granularity context templates ──────────────────────────────
@@ -81,11 +81,58 @@ def _get_llm():
     return llm_cls()
 
 
+def _make_opinion(expert, content: str, suggestions: list[str]) -> ExpertOpinion:
+    return ExpertOpinion(
+        expert_id=expert.expert_id, expert_type=expert.expert_type,
+        role=expert._role, content=content, suggestions=suggestions
+    )
+
+
+# ── StreamingExpertMixin ─────────────────────────────────────
+
+class StreamingExpertMixin:
+    """混入到各专家类中，提供 speak_stream 的通用实现。"""
+
+    def _build_prompt_and_temp(self, context: dict) -> Tuple[str, float]:
+        """子类必须实现此方法。"""
+        raise NotImplementedError
+
+    def _extract_suggestions(self, content: str) -> list[str]:
+        """子类可覆盖以解析建议。"""
+        return []
+
+    def speak(self, outline, context: dict) -> ExpertOpinion:
+        prompt, temp = self._build_prompt_and_temp(context or {})
+        content = _get_llm().invoke(prompt, temperature=temp)
+        return _make_opinion(self, content, self._extract_suggestions(content))
+
+    def speak_stream(self, outline=None, context: dict = None):
+        """流式发言：逐 chunk 返回，最后 yield __done__。"""
+        context = context or {}
+        prompt, temp = self._build_prompt_and_temp(context)
+        llm = _get_llm()
+        full = ""
+        for chunk in llm.stream(prompt, temperature=temp):
+            if isinstance(chunk, tuple):
+                chunk_type, chunk_content = chunk
+                if chunk_content is None:
+                    continue
+                yield (chunk_type, chunk_content)
+                if chunk_type == "content":
+                    full += chunk_content
+            else:
+                if chunk is None:
+                    continue
+                yield ("content", chunk)
+                full += chunk
+        yield ("__done__", _make_opinion(self, full, self._extract_suggestions(full)))
+
+
 # ── Experts ────────────────────────────────────────────────────
 
 
 @register_module("expert")
-class SeniorAuthorV1(BaseConfigurableExpert):
+class SeniorAuthorV1(StreamingExpertMixin, BaseConfigurableExpert):
     @property
     def expert_id(self) -> str:
         return "senior_author_v1"
@@ -94,8 +141,7 @@ class SeniorAuthorV1(BaseConfigurableExpert):
     def expert_type(self) -> str:
         return "资深作者"
 
-    def speak(self, outline, context: dict) -> ExpertOpinion:
-        llm = _get_llm()
+    def _build_prompt_and_temp(self, context: dict) -> Tuple[str, float]:
         vision_text = _format_vision(context.get("vision", {}))
         worldbook = context.get("worldbook", "暂无")
         reader_opinion = context.get("reader_opinion", "")
@@ -127,13 +173,7 @@ class SeniorAuthorV1(BaseConfigurableExpert):
 {f"自定义指令：{custom_prompt}" if custom_prompt else ""}
 
 请发言。保持简洁专业，用作者视角。"""
-
-        content = llm.invoke(prompt, temperature=0.8)
-        suggestions = self._extract_suggestions(content)
-        return ExpertOpinion(
-            expert_id=self.expert_id, expert_type=self.expert_type,
-            role=self._role, content=content, suggestions=suggestions
-        )
+        return (prompt, 0.8)
 
     def _extract_suggestions(self, content: str) -> list[str]:
         suggestions = []
@@ -150,7 +190,7 @@ class SeniorAuthorV1(BaseConfigurableExpert):
 
 
 @register_module("expert")
-class ReaderRepresentativeV1(BaseConfigurableExpert):
+class ReaderRepresentativeV1(StreamingExpertMixin, BaseConfigurableExpert):
     @property
     def expert_id(self) -> str:
         return "reader_representative_v1"
@@ -159,8 +199,7 @@ class ReaderRepresentativeV1(BaseConfigurableExpert):
     def expert_type(self) -> str:
         return "读者代表"
 
-    def speak(self, outline, context: dict) -> ExpertOpinion:
-        llm = _get_llm()
+    def _build_prompt_and_temp(self, context: dict) -> Tuple[str, float]:
         vision_text = _format_vision(context.get("vision", {}))
         author_proposal = context.get("author_proposal", "")
         history = context.get("history", [])
@@ -191,20 +230,18 @@ class ReaderRepresentativeV1(BaseConfigurableExpert):
 
 请从读者角度发表意见。指出可能的问题点，但不要给出解决方案。
 保持简洁，列出2-4个关键意见。"""
+        return (prompt, 0.8)
 
-        content = llm.invoke(prompt, temperature=0.8)
+    def _extract_suggestions(self, content: str) -> list[str]:
         suggestions = []
         if "疲劳" in content: suggestions.append("检测到节奏疲劳风险")
         if "不合理" in content or "困惑" in content: suggestions.append("检测到逻辑疑问")
         if "弃书" in content or "骂" in content: suggestions.append("检测到严重劝退风险")
-        return ExpertOpinion(
-            expert_id=self.expert_id, expert_type=self.expert_type,
-            role=self._role, content=content, suggestions=suggestions
-        )
+        return suggestions
 
 
 @register_module("expert")
-class PlotArchitectV1(BaseConfigurableExpert):
+class PlotArchitectV1(StreamingExpertMixin, BaseConfigurableExpert):
     @property
     def expert_id(self) -> str:
         return "plot_architect_v1"
@@ -213,8 +250,7 @@ class PlotArchitectV1(BaseConfigurableExpert):
     def expert_type(self) -> str:
         return "剧情架构师"
 
-    def speak(self, outline, context: dict) -> ExpertOpinion:
-        llm = _get_llm()
+    def _build_prompt_and_temp(self, context: dict) -> Tuple[str, float]:
         vision_text = _format_vision(context.get("vision", {}))
         volume_plan = context.get("volume_plan", "")
         worldbook = context.get("worldbook", "")
@@ -247,8 +283,9 @@ class PlotArchitectV1(BaseConfigurableExpert):
 {f"自定义指令：{custom_prompt}" if custom_prompt else ""}
 
 请发言。用结构化方式呈现你的分析。"""
+        return (prompt, 0.7)
 
-        content = llm.invoke(prompt, temperature=0.7)
+    def _extract_suggestions(self, content: str) -> list[str]:
         suggestions = []
         for line in content.split("\n"):
             line = line.strip()
@@ -256,14 +293,11 @@ class PlotArchitectV1(BaseConfigurableExpert):
                 suggestions.append(line)
             elif "序列" in line or "功能" in line:
                 suggestions.append(line)
-        return ExpertOpinion(
-            expert_id=self.expert_id, expert_type=self.expert_type,
-            role=self._role, content=content, suggestions=suggestions
-        )
+        return suggestions
 
 
 @register_module("expert")
-class CharacterDesignerV1(BaseConfigurableExpert):
+class CharacterDesignerV1(StreamingExpertMixin, BaseConfigurableExpert):
     @property
     def expert_id(self) -> str:
         return "character_designer_v1"
@@ -272,8 +306,7 @@ class CharacterDesignerV1(BaseConfigurableExpert):
     def expert_type(self) -> str:
         return "人物设计师"
 
-    def speak(self, outline, context: dict) -> ExpertOpinion:
-        llm = _get_llm()
+    def _build_prompt_and_temp(self, context: dict) -> Tuple[str, float]:
         vision_text = _format_vision(context.get("vision", {}))
         volume_plan = context.get("volume_plan", "")
         history = context.get("history", [])
@@ -305,21 +338,19 @@ class CharacterDesignerV1(BaseConfigurableExpert):
 {f"自定义指令：{custom_prompt}" if custom_prompt else ""}
 
 请发言。关注人物层面的合理性。"""
+        return (prompt, 0.7)
 
-        content = llm.invoke(prompt, temperature=0.7)
+    def _extract_suggestions(self, content: str) -> list[str]:
         suggestions = []
         for line in content.split("\n"):
             line = line.strip()
             if "人物" in line or "角色" in line:
                 suggestions.append(line)
-        return ExpertOpinion(
-            expert_id=self.expert_id, expert_type=self.expert_type,
-            role=self._role, content=content, suggestions=suggestions
-        )
+        return suggestions
 
 
 @register_module("expert")
-class WebEditorV1(BaseConfigurableExpert):
+class WebEditorV1(StreamingExpertMixin, BaseConfigurableExpert):
     @property
     def expert_id(self) -> str:
         return "web_editor_v1"
@@ -328,8 +359,7 @@ class WebEditorV1(BaseConfigurableExpert):
     def expert_type(self) -> str:
         return "网络编辑"
 
-    def speak(self, outline, context: dict) -> ExpertOpinion:
-        llm = _get_llm()
+    def _build_prompt_and_temp(self, context: dict) -> Tuple[str, float]:
         vision_text = _format_vision(context.get("vision", {}))
         volume_plan = context.get("volume_plan", "")
         history = context.get("history", [])
@@ -361,20 +391,18 @@ class WebEditorV1(BaseConfigurableExpert):
 {f"自定义指令：{custom_prompt}" if custom_prompt else ""}
 
 请发言。从市场和读者角度评估。"""
+        return (prompt, 0.7)
 
-        content = llm.invoke(prompt, temperature=0.7)
+    def _extract_suggestions(self, content: str) -> list[str]:
         suggestions = []
         if "爽点" in content: suggestions.append("包含爽点分析")
         if "毒点" in content or "劝退" in content: suggestions.append("检测到毒点风险")
         if "节奏" in content: suggestions.append("包含节奏建议")
-        return ExpertOpinion(
-            expert_id=self.expert_id, expert_type=self.expert_type,
-            role=self._role, content=content, suggestions=suggestions
-        )
+        return suggestions
 
 
 @register_module("expert")
-class ChapterSplitterV1(BaseConfigurableExpert):
+class ChapterSplitterV1(StreamingExpertMixin, BaseConfigurableExpert):
     @property
     def expert_id(self) -> str:
         return "chapter_splitter_v1"
@@ -383,8 +411,7 @@ class ChapterSplitterV1(BaseConfigurableExpert):
     def expert_type(self) -> str:
         return "章节拆分师"
 
-    def speak(self, outline, context: dict) -> ExpertOpinion:
-        llm = _get_llm()
+    def _build_prompt_and_temp(self, context: dict) -> Tuple[str, float]:
         vision_text = _format_vision(context.get("vision", {}))
         volume_plan = context.get("volume_plan", "")
         author_proposal = context.get("author_proposal", "")
@@ -426,21 +453,19 @@ class ChapterSplitterV1(BaseConfigurableExpert):
 {f"自定义指令：{custom_prompt}" if custom_prompt else ""}
 
 请拆解章节。从当前讨论的阶段开始，依次展开后续章节。"""
+        return (prompt, 0.7)
 
-        content = llm.invoke(prompt, temperature=0.7)
+    def _extract_suggestions(self, content: str) -> list[str]:
         suggestions = []
         for line in content.split("\n"):
             line = line.strip()
             if "第" in line and "章" in line and "：" in line:
                 suggestions.append(line)
-        return ExpertOpinion(
-            expert_id=self.expert_id, expert_type=self.expert_type,
-            role=self._role, content=content, suggestions=suggestions
-        )
+        return suggestions
 
 
 @register_module("expert")
-class DiscussionSummarizerV1(BaseConfigurableExpert):
+class DiscussionSummarizerV1(StreamingExpertMixin, BaseConfigurableExpert):
     @property
     def expert_id(self) -> str:
         return "discussion_summarizer_v1"
@@ -449,8 +474,7 @@ class DiscussionSummarizerV1(BaseConfigurableExpert):
     def expert_type(self) -> str:
         return "讨论总结师"
 
-    def speak(self, outline, context: dict) -> ExpertOpinion:
-        llm = _get_llm()
+    def _build_prompt_and_temp(self, context: dict) -> Tuple[str, float]:
         vision_text = _format_vision(context.get("vision", {}))
         history = context.get("history", [])
         container_context = context.get("container_context", "")
@@ -481,12 +505,10 @@ class DiscussionSummarizerV1(BaseConfigurableExpert):
 {f"自定义指令：{custom_prompt}" if custom_prompt else ""}
 
 请简洁总结。用「共识」「分歧」「建议」三个小节。每节不超过3句话。"""
+        return (prompt, 0.5)
 
-        content = llm.invoke(prompt, temperature=0.5)
+    def _extract_suggestions(self, content: str) -> list[str]:
         suggestions = []
         if "共识" in content: suggestions.append("包含共识提炼")
         if "分歧" in content: suggestions.append("包含分歧标注")
-        return ExpertOpinion(
-            expert_id=self.expert_id, expert_type=self.expert_type,
-            role=self._role, content=content, suggestions=suggestions
-        )
+        return suggestions

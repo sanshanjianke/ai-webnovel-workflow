@@ -80,6 +80,11 @@ class MeetingFeedback(BaseModel):
     expert_id: Optional[str] = None  # for call_expert action
 
 
+def sse_data(data: dict) -> str:
+    """L1 风格: 纯 data: 格式，type 在 JSON 内"""
+    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
 # ── API Endpoints ────────────────────────────────────────────
 
 
@@ -365,9 +370,9 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
                 feedback_state["action"] = fb.get("action", "")
                 feedback_state["message"] = fb.get("message", "")
                 feedback_state["expert_id"] = fb.get("expert_id")
-                yield sse_format("user_feedback", fb)
+                yield f"data: {json.dumps({'type': 'user_feedback', **fb}, ensure_ascii=False)}\n\n"
             except asyncio.TimeoutError:
-                yield sse_format("timeout", {"message": "等待用户反馈超时"})
+                yield f"data: {json.dumps({'type': 'timeout', 'message': '等待用户反馈超时'}, ensure_ascii=False)}\n\n"
 
         runner = engine.run_pipeline if use_pipeline else engine.run
 
@@ -383,11 +388,11 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
                         round=engine.current_round
                     )
 
-                yield sse_format(event["type"], event)
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
                 if event["type"] == "waiting_user":
                     async for fb_event in wait_for_feedback():
-                        yield fb_event
+                        yield f"data: {json.dumps(fb_event, ensure_ascii=False)}\n\n"
 
                 if event["type"] == "output_ready":
                     output = event["output"]
@@ -412,7 +417,7 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
                     with open(md_path, "w", encoding="utf-8") as f:
                         f.write(md_content)
 
-                    yield sse_format("done", {"message": "Meeting completed", "output": output})
+                    yield f"data: {json.dumps({'type': 'done', 'message': 'Meeting completed', 'output': output}, ensure_ascii=False)}\n\n"
         finally:
             _pending_feedback.pop(project_id, None)
 

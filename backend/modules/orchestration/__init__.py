@@ -294,7 +294,15 @@ class MeetingEngine:
                 "container_id": container_id,
             }
 
-            opinion = expert.speak(None, context)
+            opinion = ExpertOpinion(expert_id=expert_id, expert_type=expert.expert_type, role=role, content="")
+            full_content = ""
+            for chunk in expert.speak_stream(None, context):
+                if isinstance(chunk, tuple) and chunk[0] == "__done__":
+                    opinion = chunk[1]
+                elif isinstance(chunk, tuple):
+                    chunk_type, chunk_content = chunk
+                    if chunk_type == "content":
+                        full_content += chunk_content
             opinion.role = role
             self._meeting_history.append(opinion)
             self._speech_count += 1
@@ -549,6 +557,20 @@ class MeetingEngine:
             "total_speeches": self._speech_count
         }
 
+    def _inject_upstream_context(self, ctx, upstream_outputs, node_map, input_text):
+        for up_nid, up_content in upstream_outputs:
+            up_experts = node_map.get(up_nid, [])
+            if up_experts:
+                up_eid = up_experts[0].get("expert_id", "")
+                if up_eid in ("senior_author_v1", "plot_architect_v1"):
+                    ctx["author_proposal"] = up_content
+                elif up_eid == "reader_representative_v1":
+                    ctx["reader_opinion"] = up_content
+                elif up_eid == "web_editor_v1":
+                    ctx["editor_opinion"] = up_content
+        if input_text and input_text.strip():
+            ctx["custom_prompt"] = (ctx.get("custom_prompt", "") + f"\n\n上游节点产出：\n{input_text}").strip()
+
     def run_pipeline(
         self,
         context_input: dict,
@@ -628,16 +650,16 @@ class MeetingEngine:
             yield {"type": "level_start", "level": level_idx + 1, "total_levels": len(topo_levels), "nodes": level}
 
             for nid in level:
-                # 收集上游输入
+                # 收集上游输入并映射到正确的上下文字段
                 upstream_outputs = []
                 for other_nid, targets in out_edges.items():
                     if nid in targets and other_nid in node_outputs:
-                        upstream_outputs.append(f"[{other_nid}]:\n{node_outputs[other_nid]}")
+                        upstream_outputs.append((other_nid, node_outputs[other_nid]))
 
                 if not upstream_outputs:
                     input_text = json.dumps(context_input, ensure_ascii=False, indent=2)[:5000]
                 else:
-                    input_text = "\n\n---\n\n".join(upstream_outputs)
+                    input_text = "\n\n---\n\n".join(f"[{nid}]:\n{content}" for nid, content in upstream_outputs)
 
                 # 判断是容器还是单独专家
                 is_container = nid in self._container_map
@@ -655,16 +677,23 @@ class MeetingEngine:
                             "history": [ExpertOpinion(expert_id=op[0], expert_type=op[0], role=ExpertRole(op[1]), content=op[2]) for op in container_history],
                             "custom_prompt": ""
                         }
-                        if input_text and input_text.strip():
-                            ctx["custom_prompt"] = f"参考上游节点输出：\n\n{input_text}"
+                        self._inject_upstream_context(ctx, upstream_outputs, node_map, input_text)
                         self._inject_history_context(ctx)
                         self._speech_count += 1
                         yield {"type": "expert_start", "expert_id": eid, "expert_type": expert.expert_type, "role": role.value, "container_id": nid, "level": level_idx + 1}
-                        opinion = expert.speak(None, ctx)
+                        full_content = ""
+                        for chunk in expert.speak_stream(None, ctx):
+                            if isinstance(chunk, tuple) and chunk[0] == "__done__":
+                                opinion = chunk[1]
+                            elif isinstance(chunk, tuple):
+                                chunk_type, chunk_content = chunk
+                                yield {"type": "expert_chunk", "chunk_type": chunk_type, "content": chunk_content, "expert_id": eid, "container_id": nid, "level": level_idx + 1}
+                                if chunk_type == "content":
+                                    full_content += chunk_content
                         opinion.role = role
-                        container_history.append((eid, role.value, opinion.content))
-                        output_parts.append(f"### {expert.expert_type}\n{opinion.content}")
-                        yield {"type": "expert_speak", "expert_id": eid, "expert_type": expert.expert_type, "role": role.value, "content": opinion.content, "container_id": nid, "level": level_idx + 1}
+                        container_history.append((eid, role.value, full_content))
+                        output_parts.append(f"### {expert.expert_type}\n{full_content}")
+                        yield {"type": "expert_speak", "expert_id": eid, "expert_type": expert.expert_type, "role": role.value, "content": full_content, "suggestions": opinion.suggestions, "container_id": nid, "level": level_idx + 1}
                     node_outputs[nid] = "\n\n".join(output_parts)
                 else:
                     # 单独专家节点
@@ -679,15 +708,21 @@ class MeetingEngine:
                             "history": [],
                             "custom_prompt": (exp.get("custom_prompt") or "")
                         }
-                        # 将上游输出注入为自定义 prompt
-                        if input_text and input_text.strip():
-                            ctx["custom_prompt"] = f"上一节点的输出请在处理时参考：\n\n{input_text}\n\n---\n{ctx['custom_prompt']}"
+                        self._inject_upstream_context(ctx, upstream_outputs, node_map, input_text)
                         self._speech_count += 1
                         yield {"type": "expert_start", "expert_id": exp["expert_id"], "expert_type": expert.expert_type, "role": exp["role"], "node_id": nid, "level": level_idx + 1}
-                        opinion = expert.speak(None, ctx)
+                        full_content = ""
+                        for chunk in expert.speak_stream(None, ctx):
+                            if isinstance(chunk, tuple) and chunk[0] == "__done__":
+                                opinion = chunk[1]
+                            elif isinstance(chunk, tuple):
+                                chunk_type, chunk_content = chunk
+                                yield {"type": "expert_chunk", "chunk_type": chunk_type, "content": chunk_content, "expert_id": exp["expert_id"], "node_id": nid, "level": level_idx + 1}
+                                if chunk_type == "content":
+                                    full_content += chunk_content
                         opinion.role = ExpertRole(exp["role"])
-                        node_outputs[nid] = opinion.content
-                        yield {"type": "expert_speak", "expert_id": exp["expert_id"], "expert_type": expert.expert_type, "role": exp["role"], "content": opinion.content, "node_id": nid, "level": level_idx + 1}
+                        node_outputs[nid] = full_content
+                        yield {"type": "expert_speak", "expert_id": exp["expert_id"], "expert_type": expert.expert_type, "role": exp["role"], "content": full_content, "suggestions": opinion.suggestions, "node_id": nid, "level": level_idx + 1}
                     else:
                         yield {"type": "node_skip", "node_id": nid, "reason": "no expert"}
 
@@ -697,7 +732,8 @@ class MeetingEngine:
             yield {"type": "level_complete", "level": level_idx + 1}
 
         self._state = "completed"
-        output = {"node_outputs": node_outputs, "total_speeches": self._speech_count}
+        pipeline_summary = "\n\n---\n\n".join(f"## {nid}\n\n{content}" for nid, content in node_outputs.items())
+        output = {"node_outputs": node_outputs, "total_speeches": self._speech_count, "meeting_summary": pipeline_summary}
         yield {"type": "pipeline_complete", "output": output}
         return output
 

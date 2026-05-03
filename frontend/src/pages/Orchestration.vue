@@ -70,7 +70,7 @@
           </div>
           <div class="card" v-if="meetingOutput">
             <h3>产出</h3>
-            <div class="output-preview" v-html="renderMarkdown(meetingOutput.meeting_summary || '无内容')"></div>
+            <div class="output-preview" v-html="renderMarkdown(getMeetingSummary())"></div>
           </div>
         </div>
       </div>
@@ -182,6 +182,34 @@ function routeMessage(msg) {
   }
 }
 
+function appendToLatestMessage(cid, chunkType, chunkContent) {
+  if (!messagesByContainer[cid]) messagesByContainer[cid] = []
+  const msgs = messagesByContainer[cid]
+  if (chunkType === 'thinking') return  // 思考过程当前不显示
+  let last = msgs.length > 0 ? msgs[msgs.length - 1] : null
+  if (!last || !last.streaming) {
+    last = { type: 'expert', expert_type: '', content: '', streaming: true, timestamp: new Date().toISOString() }
+    msgs.push(last)
+  }
+  last.content += chunkContent
+  if (activeChat.value === cid) markRead(cid)
+}
+
+function finalizeStreamingMessage(cid, expertType, content, suggestions, expertId) {
+  if (!messagesByContainer[cid]) messagesByContainer[cid] = []
+  const msgs = messagesByContainer[cid]
+  let last = msgs.length > 0 ? msgs[msgs.length - 1] : null
+  if (last && last.streaming) {
+    last.content = content
+    last.expert_type = expertType
+    last.expert_id = expertId
+    last.streaming = false
+  } else {
+    msgs.push({ type: 'expert', expert_type: expertType, expert_id: expertId, content, streaming: false, timestamp: new Date().toISOString() })
+  }
+  if (activeChat.value === cid) markRead(cid)
+}
+
 function markRead(cid) {
   const msgs = messagesByContainer[cid]
   if (msgs) readMessages[cid] = msgs.length - 1
@@ -225,9 +253,14 @@ async function startMeeting() {
       buffer = lines.pop() || ''
       let eventType = ''
       for (const line of lines) {
+        if (!line.trim()) { eventType = ''; continue }
         if (line.startsWith('event: ')) { eventType = line.slice(7).trim() }
-        else if (line.startsWith('data: ') && eventType) {
-          try { handleSSEEvent(eventType, JSON.parse(line.slice(6))) } catch (e) { console.warn('Parse error:', e) }
+        else if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6))
+            const type = eventType || data.type || 'message'
+            handleSSEEvent(type, data)
+          } catch (e) { console.warn('Parse error:', e) }
           eventType = ''
         }
       }
@@ -262,11 +295,34 @@ function handleSSEEvent(type, data) {
       currentRound.value = data.round || (currentRound.value + 1)
       routeMessage({ type: 'system', content: `--- 第 ${currentRound.value} 轮 ---`, timestamp: new Date().toISOString() })
       break
-    case 'expert_speak':
-      speechCount.value = data.speech_count || speechCount.value
-      routeMessage({ type: 'expert', expert_type: data.expert_type, content: data.content, container_id: data.container_id || data.node_id, expert_id: data.expert_id, timestamp: new Date().toISOString() })
-      if (data.mention) routeMessage({ type: 'system', content: `→ @${getExpertLabel(data.mention)} 被提及`, container_id: data.container_id, timestamp: new Date().toISOString() })
+    case 'expert_start': {
+      speechCount.value = data.speech_count || (speechCount.value + 1)
+      const containerId = data.container_id || null
+      const expertId = data.expert_id
+      routeMessage({ type: 'expert', expert_type: data.expert_type, content: '', container_id: containerId, expert_id: expertId, streaming: true, timestamp: new Date().toISOString() })
+      // 自动切换到当前专家的 tab
+      if (chatGroups.value.length > 0) {
+        const g = chatGroups.value.find(g => g.key === (containerId || expertId))
+        if (g && activeChat.value !== g.key) activeChat.value = g.key
+      }
       break
+    }
+    case 'expert_chunk': {
+      const containerId = data.container_id || null
+      const expertId = data.expert_id
+      const cid = containerId || expertId || 'solo'
+      appendToLatestMessage(cid, data.chunk_type, data.content)
+      break
+    }
+    case 'expert_speak': {
+      const containerId = data.container_id || null
+      const expertId = data.expert_id
+      const cid = containerId || expertId || 'solo'
+      speechCount.value = data.speech_count || speechCount.value
+      finalizeStreamingMessage(cid, data.expert_type, data.content, data.suggestions, expertId)
+      if (data.mention) routeMessage({ type: 'system', content: `→ @${getExpertLabel(data.mention)} 被提及`, container_id: containerId, timestamp: new Date().toISOString() })
+      break
+    }
     case 'summarizer':
       routeMessage({ type: 'summarizer', expert_type: '讨论总结师', content: data.content, container_id: data.container_id, timestamp: new Date().toISOString() })
       break
@@ -327,6 +383,18 @@ function getExpertLabel(id) {
   return labels[id] || id
 }
 function renderMarkdown(text) { return text ? md.render(text) : '' }
+function getMeetingSummary() {
+  if (!meetingOutput.value) return '无内容'
+  if (meetingOutput.value.meeting_summary) return meetingOutput.value.meeting_summary
+  if (meetingOutput.value.node_outputs) {
+    const parts = []
+    for (const [nid, content] of Object.entries(meetingOutput.value.node_outputs)) {
+      parts.push(content)
+    }
+    return parts.join('\n\n---\n\n') || '无内容'
+  }
+  return '无内容'
+}
 function formatTime(ts) { return ts ? new Date(ts).toLocaleTimeString('zh-CN') : '' }
 </script>
 

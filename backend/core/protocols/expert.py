@@ -66,3 +66,15 @@ class BaseConfigurableExpert(BaseExpert):
     @property
     def granularity(self) -> Granularity:
         return self._granularity
+    
+    def speak_stream(self, outline=None, context: dict = None):
+        """流式发言。yield (chunk_type, content) 元组，最后 yield ("__done__", ExpertOpinion)。
+        默认实现委托给 speak() 并一次性返回全部内容。
+        """
+        opinion = self.speak(outline, context or {})
+        # 分块返回，模拟流式
+        text = opinion.content
+        chunk_size = 10
+        for i in range(0, len(text), chunk_size):
+            yield ("content", text[i:i+chunk_size])
+        yield ("__done__", opinion)
