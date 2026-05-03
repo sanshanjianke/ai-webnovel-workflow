@@ -23,10 +23,6 @@
         <div v-if="messages.length === 0" class="empty-hint">
           等待消息...<br><small>在编排画布上运行管道后，消息将在此显示</small>
         </div>
-      <div class="popup-messages" ref="msgEl">
-        <div v-if="messages.length === 0" class="empty-hint">
-          等待消息...<br><small>在编排画布上运行管道后，消息将在此显示</small>
-        </div>
       <div v-for="(msg, idx) in messages" :key="idx"
         :class="['message', msg.type]">
         <div class="message-header">
