@@ -49,6 +49,23 @@ tmp/
 temp/
 *.tmp
 
+# Papers (only track markdown, not massive PDFs)
+papers/arxiv_papers/*.pdf
+papers/published_papers/**/*.pdf
+papers/published_papers/acl_anthology/
+papers/published_papers/alternative_downloads/
+papers/published_papers/batch_test/
+papers/published_papers/manual_download/
+papers/published_papers/scihub_downloads/
+papers/published_papers/download_published.sh
+papers/published_papers/download_scihub.sh
+papers/published_papers/smart_download.sh
+papers/published_papers/dois_to_acquire.txt
+papers/*.pdf
+papers/*.txt
+papers/arxiv_papers/rename_log.txt
+papers/arxiv_papers/rename_papers.sh
+
 # Secrets
 .env
 .env.local
