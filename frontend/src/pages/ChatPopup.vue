@@ -45,9 +45,9 @@ function renderMarkdown(text) { return text ? md.render(text) : '' }
 function formatTime(ts) { return ts ? new Date(ts).toLocaleTimeString('zh-CN') : '' }
 
 function matchesTarget(data) {
+  if (!data) return false
   const cid = data.container_id || data.expert_id || 'solo'
   if (cid === targetId.value) return true
-  // 也检查 node_id（管道模式独立节点）
   if (data.node_id === targetId.value) return true
   return false
 }
