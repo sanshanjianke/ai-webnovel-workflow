@@ -270,6 +270,32 @@
         </div>
       </div>
 
+      <!-- ── 右侧面板：输入源队列 ── -->
+      <div class="config-panel" v-if="selectedNode && selectedNode.type === 'inputSource'">
+        <div class="panel-header-row">
+          <h4>📥 输入源队列</h4>
+          <button class="btn-back" @click="selectedNode = null; showQueuePanel = false">← 返回</button>
+        </div>
+        <div class="queue-actions">
+          <input ref="fileInput" type="file" accept=".md,.txt" multiple @change="onFilesSelected" style="display:none" />
+          <button class="btn btn-sm" @click="$refs.fileInput.click()">+ 添加文件</button>
+          <button class="btn btn-sm" @click="selectedNode.data.files = []" :disabled="!selectedNode.data.files || selectedNode.data.files.length === 0">清空</button>
+          <button class="btn btn-sm" @click="addTextAsFile">📝 粘贴</button>
+        </div>
+        <div class="queue-list" v-if="selectedNode.data.files && selectedNode.data.files.length > 0">
+          <div v-for="(f, i) in selectedNode.data.files" :key="i" class="queue-item">
+            <span class="queue-idx">{{ i + 1 }}</span>
+            <span class="queue-name">{{ f.name }}</span>
+            <span class="queue-size">{{ (f.content.length / 1000).toFixed(1) }}KB</span>
+            <button class="btn-x" @click="selectedNode.data.files.splice(i, 1)" title="移除">✕</button>
+          </div>
+        </div>
+        <div v-else class="queue-hint">添加 .md 文件，管道将按序逐个处理</div>
+        <div class="config-actions">
+          <button class="btn btn-danger btn-sm" @click="removeNode">删除节点</button>
+        </div>
+      </div>
+
       <!-- ── 右侧面板：会议总配置 ── -->
       <div class="config-panel" v-else>
         <h4>当前配置</h4>
@@ -391,29 +417,6 @@
           <button class="btn" @click="showEditExpert = false">取消</button>
         </div>
       </div>
-    </div>
-
-    <!-- ── 输入源队列面板 ── -->
-    <div class="queue-panel" v-if="showQueuePanel && selectedNode && selectedNode.type === 'inputSource'">
-      <div class="panel-header-row">
-        <h4>📥 {{ selectedNode.data.label || '输入源' }} 队列</h4>
-        <button class="btn-back" @click="showQueuePanel = false">✕</button>
-      </div>
-      <div class="queue-actions">
-        <input ref="fileInput" type="file" accept=".md,.txt" multiple @change="onFilesSelected" style="display:none" />
-        <button class="btn btn-sm" @click="$refs.fileInput.click()">+ 添加文件</button>
-        <button class="btn btn-sm" @click="selectedNode.data.files = []" :disabled="!selectedNode.data.files || selectedNode.data.files.length === 0">清空</button>
-        <button class="btn btn-sm" @click="addTextAsFile">📝 粘贴文本</button>
-      </div>
-      <div class="queue-list" v-if="selectedNode.data.files && selectedNode.data.files.length > 0">
-        <div v-for="(f, i) in selectedNode.data.files" :key="i" class="queue-item">
-          <span class="queue-idx">{{ i + 1 }}</span>
-          <span class="queue-name">{{ f.name }}</span>
-          <span class="queue-size">{{ (f.content.length / 1000).toFixed(1) }}KB</span>
-          <button class="btn-x" @click="selectedNode.data.files.splice(i, 1)" title="移除">✕</button>
-        </div>
-      </div>
-      <div v-else class="queue-hint">添加 .md 文件到队列，管道将按序逐个处理</div>
     </div>
   </div>
 </template>
@@ -1313,13 +1316,7 @@ function hideNodeCtx() { nodeCtx.show = false }
   max-height: 200px; overflow-y: auto; margin: 0;
 }
 
-/* ── 输入源队列面板 ── */
-.queue-panel {
-  position: absolute; bottom: 12px; left: 12px; right: 12px;
-  background: white; border: 1px solid #d0d0d0; border-radius: 10px;
-  box-shadow: 0 -2px 12px rgba(0,0,0,0.1); z-index: 10;
-  padding: 12px; max-height: 200px; overflow-y: auto;
-}
+/* ── 输入源队列（在右侧配置面板内）─── */
 .queue-actions { display: flex; gap: 8px; margin: 8px 0; }
 .queue-list { display: flex; flex-direction: column; gap: 4px; }
 .queue-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: #f8f9fa; border-radius: 6px; font-size: 0.85rem; }
