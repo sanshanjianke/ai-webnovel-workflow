@@ -353,6 +353,36 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
 
     use_pipeline = getattr(request, 'pipeline', False)
 
+    if use_pipeline:
+        # 管道模式：同步生成器（像 L1 聊天），在独立线程中运行避免阻塞事件循环
+        def pipeline_stream():
+            try:
+                for event in engine.run_pipeline(vision, worldbook_text):
+                    if event["type"] == "expert_speak":
+                        logger.log_meeting(
+                            project_id=project_id,
+                            expert_id=event.get("expert_id", ""),
+                            expert_type=event.get("expert_type", ""),
+                            content=event.get("content", ""),
+                            suggestions=event.get("suggestions", []),
+                            round=engine.current_round
+                        )
+                    if event["type"] == "pipeline_complete":
+                        output = event.get("output", {})
+                        logger.log_version(project_id, "pipeline", output, "Pipeline completed")
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(
+            pipeline_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+        )
+
+    # 会议模式：异步生成器（需要接收用户反馈）
     async def generate():
         feedback_queue: asyncio.Queue = asyncio.Queue()
         _pending_feedback[project_id] = feedback_queue
@@ -374,10 +404,8 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
             except asyncio.TimeoutError:
                 yield f"data: {json.dumps({'type': 'timeout', 'message': '等待用户反馈超时'}, ensure_ascii=False)}\n\n"
 
-        runner = engine.run_pipeline if use_pipeline else engine.run
-
         try:
-            for event in runner(vision, worldbook_text, human_feedback=human_feedback):
+            for event in engine.run(vision, worldbook_text, human_feedback=human_feedback):
                 if event["type"] == "expert_speak":
                     logger.log_meeting(
                         project_id=project_id,
