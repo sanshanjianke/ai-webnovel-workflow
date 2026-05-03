@@ -16,6 +16,10 @@
           <span class="expert-name">{{ msg.expert_type || msg.type }}</span>
           <span class="timestamp">{{ formatTime(msg.timestamp) }}</span>
         </div>
+        <details v-if="msg.thinking" class="thinking-block" :open="msg.streaming">
+          <summary>💭 思考过程 <span v-if="msg.streaming" class="thinking-indicator">...</span></summary>
+          <pre class="thinking-text">{{ msg.thinking }}</pre>
+        </details>
         <pre v-if="msg.streaming" class="streaming-text">{{ msg.content }}</pre>
         <div v-else class="message-content" v-html="renderMarkdown(msg.content)"></div>
         <span v-if="msg.streaming" class="streaming-cursor">▊</span>
@@ -71,10 +75,9 @@ onMounted(() => {
 
     if (type === 'expert_start') {
       if (!matchesTarget(data)) return
-      // 创建流式占位
       messages.value.push({
         type: 'expert', expert_type: data.expert_type,
-        expert_id: data.expert_id, content: '', streaming: true,
+        expert_id: data.expert_id, content: '', thinking: '', streaming: true,
         timestamp: timestamp || new Date().toISOString()
       })
       scrollDown()
@@ -86,11 +89,13 @@ onMounted(() => {
       const msgs = messages.value
       let last = msgs.length > 0 ? msgs[msgs.length - 1] : null
       if (!last || !last.streaming) {
-        last = { type: 'expert', expert_type: data.expert_type || '', content: '', streaming: true,
+        last = { type: 'expert', expert_type: data.expert_type || '', content: '', thinking: '', streaming: true,
           timestamp: timestamp || new Date().toISOString() }
         msgs.push(last)
       }
-      if (data.chunk_type === 'content') {
+      if (data.chunk_type === 'thinking') {
+        last.thinking = (last.thinking || '') + (data.content || '')
+      } else if (data.chunk_type === 'content') {
         last.content += data.content || ''
       }
       scrollDown()
@@ -158,6 +163,10 @@ onUnmounted(() => {
 .timestamp { margin-left: auto; font-size: 0.75rem; color: #999; }
 .message-content { line-height: 1.6; font-size: 0.9rem; }
 .streaming-text { white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: 0.9rem; line-height: 1.6; margin: 0; }
+.thinking-block { margin-bottom: 0.5rem; font-size: 0.8rem; }
+.thinking-block summary { cursor: pointer; color: #7f8c8d; font-size: 0.8rem; user-select: none; }
+.thinking-indicator { animation: blink 0.8s infinite; color: #3498db; }
+.thinking-text { white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: 0.8rem; color: #7f8c8d; background: #f9f9f9; padding: 0.5rem; border-radius: 4px; margin-top: 0.3rem; max-height: 200px; overflow-y: auto; }
 .streaming-cursor { display: inline; animation: blink 0.8s infinite; color: #3498db; font-weight: bold; }
 .empty-hint { text-align: center; color: #999; padding: 3rem 1rem; font-size: 0.9rem; line-height: 1.8; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
