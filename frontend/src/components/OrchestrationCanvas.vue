@@ -277,7 +277,7 @@
           <button class="btn-back" @click="selectedNode = null; showQueuePanel = false">← 返回</button>
         </div>
         <div class="queue-actions">
-          <input ref="fileInput" type="file" accept=".md,.txt" multiple @change="onFilesSelected" style="display:none" />
+          <input ref="fileInput" type="file" multiple @change="onFilesSelected" style="display:none" />
           <button class="btn btn-sm" @click="$refs.fileInput.click()">+ 添加文件</button>
           <button class="btn btn-sm" @click="selectedNode.data.files = []" :disabled="!selectedNode.data.files || selectedNode.data.files.length === 0">清空</button>
           <button class="btn btn-sm" @click="addTextAsFile">📝 粘贴</button>
