@@ -17,7 +17,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted, reactive } from 'vue'
 import { useRoute } from 'vue-router'
 import OrchestrationCanvas from '../components/OrchestrationCanvas.vue'
 
@@ -26,19 +26,36 @@ const projectId = computed(() => route.query.projectId || '')
 
 const isRunning = ref(false)
 const speechCount = ref(0)
+const messageBuffer = reactive({})  // { cid: [messages] }
 let chatChannel = null
 
+// 启动时建立 BroadcastChannel 并监听 sync 请求
+onMounted(() => {
+  chatChannel = new BroadcastChannel('meeting-chat')
+  chatChannel.onmessage = (event) => {
+    if (event.data?.type === 'sync') {
+      const msgs = messageBuffer[event.data.targetId] || []
+      for (const m of msgs) {
+        chatChannel.postMessage({ type: 'message', data: m, timestamp: m.timestamp })
+      }
+    }
+  }
+})
+
+onUnmounted(() => {
+  if (chatChannel) { chatChannel.close(); chatChannel = null }
+})
+
 function onRun(config) {
+  for (const key of Object.keys(messageBuffer)) delete messageBuffer[key]
   speechCount.value = 0
   isRunning.value = true
-  if (!chatChannel) chatChannel = new BroadcastChannel('meeting-chat')
   startMeeting(config)
 }
 
 function stopMeeting() {
   isRunning.value = false
-  if (chatChannel) { chatChannel.postMessage({ type: 'done' }); chatChannel.close(); chatChannel = null }
-  // Send stop feedback to abort server-side
+  chatChannel?.postMessage({ type: 'done' })
   if (projectId.value) {
     fetch(`/api/projects/${projectId.value}/meeting/feedback`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -100,7 +117,6 @@ function handleSSEEvent(type, data) {
     case 'pipeline_complete':
       isRunning.value = false
       broadcast('done', { output: data.output })
-      if (chatChannel) { chatChannel.postMessage({ type: 'done' }); chatChannel.close(); chatChannel = null }
       break
     case 'level_start':
     case 'level_complete':
@@ -112,7 +128,15 @@ function handleSSEEvent(type, data) {
 }
 
 function broadcast(type, data) {
-  if (chatChannel) chatChannel.postMessage({ type, data, timestamp: new Date().toISOString() })
+  if (!chatChannel) return
+  const ts = new Date().toISOString()
+  chatChannel.postMessage({ type, data, timestamp: ts })
+  // 缓冲消息以供新打开的窗口同步
+  const cid = data.container_id || data.expert_id || data.node_id || 'solo'
+  if (!messageBuffer[cid]) messageBuffer[cid] = []
+  messageBuffer[cid].push({ ...data, type, timestamp: ts })
+  // 只保留最近 50 条
+  if (messageBuffer[cid].length > 50) messageBuffer[cid].shift()
 }
 </script>
 
