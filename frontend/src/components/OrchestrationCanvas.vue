@@ -284,7 +284,7 @@
           @click="runMeeting" 
           :disabled="orderedNodes.length === 0 || props.isRunning"
         >
-          {{ props.isRunning ? '● 运行中' : '运行会议' }}
+          {{ props.isRunning ? '● 运行中' : '开始流程' }}
         </button>
         <button class="btn btn-outline btn-save" style="width:100%; margin-top:6px;" @click="saveDesign" :disabled="!projectId || saveStatus === 'saving'">
           {{ saveStatus === 'saving' ? '保存中...' : saveStatus === 'saved' ? '已保存 ✓' : saveStatus === 'error' ? '保存失败 ✗' : '清空' }}
@@ -442,7 +442,7 @@ const newExpert = reactive({
 })
 
 const expertCtx = reactive({ show: false, x: 0, y: 0, id: '', data: null, isBuiltin: true })
-const nodeCtx = reactive({ show: false, x: 0, y: 0, nodeId: '', type: '' })
+const nodeCtx = reactive({ show: false, x: 0, y: 0, nodeId: '', type: '', nodeData: null })
 const showViewExpert = ref(false)
 const viewExpertData = reactive({ id: '', name: '', icon: '', desc: '', prompt: '' })
 const showEditExpert = ref(false)
@@ -914,6 +914,7 @@ const orderedNodes = computed(() => {
 function runMeeting() {
   const experts = orderedNodes.value.map(node => ({
     expert_id: node.data.expertId,
+    node_id: node.id,
     role: node.data.role || 'main',
     custom_prompt: node.data.customPrompt || null,
     container_id: node.parentNode || null,
@@ -953,8 +954,16 @@ function runMeeting() {
 
   emit('run', {
     meeting_name: meetingName.value,
+    pipeline: true,
     experts,
-    containers
+    containers,
+    edges: edges.value.filter(e => {
+      const isInterContainer = nodes.value.some(n => 
+        (n.type === 'container' && (e.source === n.id || e.target === n.id || 
+         (n.data.children || []).includes(e.source) || (n.data.children || []).includes(e.target)))
+      )
+      return !isInterContainer
+    }).map(e => ({ source: e.source, target: e.target }))
   })
 }
 
@@ -1035,7 +1044,7 @@ function onNodeDoubleClick({ node }) {
   if (node.type === 'container') {
     emit('openChat', { containerId: node.id, newWindow: true })
   } else if (node.type === 'expert') {
-    emit('openChat', { containerId: node.parentNode || null, expertId: node.id, newWindow: true })
+    emit('openChat', { containerId: node.parentNode || null, expertId: node.data.expertId, newWindow: true })
   }
 }
 
@@ -1046,6 +1055,7 @@ function onNodeContextMenu({ event, node }) {
   nodeCtx.y = event.clientY
   nodeCtx.nodeId = node.id
   nodeCtx.type = node.type
+  nodeCtx.nodeData = node.data
 }
 
 function openChatNewWindow() {
@@ -1054,7 +1064,7 @@ function openChatNewWindow() {
     emit('openChat', { containerId: n.nodeId, newWindow: true })
   } else if (n.type === 'expert') {
     const expertNode = nodes.value.find(x => x.id === n.nodeId)
-    emit('openChat', { containerId: expertNode?.parentNode || null, newWindow: true })
+    emit('openChat', { containerId: expertNode?.parentNode || null, expertId: n.nodeData?.expertId, newWindow: true })
   }
   nodeCtx.show = false
 }
@@ -1065,7 +1075,7 @@ function openChatInline() {
     emit('openChat', { containerId: n.nodeId, newWindow: false })
   } else if (n.type === 'expert') {
     const expertNode = nodes.value.find(x => x.id === n.nodeId)
-    emit('openChat', { containerId: expertNode?.parentNode || null, newWindow: false })
+    emit('openChat', { containerId: expertNode?.parentNode || null, expertId: n.nodeData?.expertId, newWindow: false })
   }
   nodeCtx.show = false
 }

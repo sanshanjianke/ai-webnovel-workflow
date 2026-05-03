@@ -11,6 +11,7 @@ from backend.core.registry import get_module, MODULE_REGISTRY
 from typing import Optional, Generator
 import re
 import asyncio
+import json
 
 
 MENTION_RE = re.compile(r'@([^\s,，。！？…\n]{1,20})')
@@ -547,6 +548,158 @@ class MeetingEngine:
             "total_rounds": self._round_idx,
             "total_speeches": self._speech_count
         }
+
+    def run_pipeline(
+        self,
+        context_input: dict,
+        worldbook_text: str = "",
+        rag_context: str = "",
+        human_feedback=None,
+    ) -> Generator[dict, None, Optional[dict]]:
+        """管道模式：按 DAG 拓扑顺序逐节点处理，数据沿边流动"""
+        self._state = "running"
+        self._speech_count = 0
+        self._init_containers()
+
+        # 构建节点图：vue_node_id → expert_id 映射
+        vue_to_expert: dict[str, str] = {}
+        node_map: dict[str, list[dict]] = {}
+        for ec in self.config.experts:
+            vue_id = ec.node_id or ec.expert_id
+            key = ec.container_id or vue_id
+            if key not in node_map:
+                node_map[key] = []
+            node_map[key].append({"expert_id": ec.expert_id, "role": ec.role.value if hasattr(ec.role, 'value') else ec.role, "custom_prompt": ec.custom_prompt})
+            vue_to_expert[ec.node_id or ec.expert_id] = ec.expert_id
+
+        # 容器节点也加入映射
+        for c in self.config.containers:
+            vue_to_expert[c.container_id] = c.container_id
+
+        # 用 config.edges 建 DAG，映射 vue node ID → 引擎节点 key
+        all_node_ids = set(node_map.keys())
+        in_degree: dict[str, int] = {}
+        out_edges: dict[str, list[str]] = {}
+
+        for nid in all_node_ids:
+            in_degree.setdefault(nid, 0)
+            out_edges.setdefault(nid, [])
+
+        for edge in self.config.edges:
+            src_vue = edge.get("source", "")
+            tgt_vue = edge.get("target", "")
+            # 映射到引擎 key
+            src = None
+            tgt = None
+            for ec in self.config.experts:
+                if ec.node_id == src_vue:
+                    src = ec.container_id or src_vue
+                if ec.node_id == tgt_vue:
+                    tgt = ec.container_id or tgt_vue
+            # 容器节点
+            for c in self.config.containers:
+                if c.container_id == src_vue:
+                    src = c.container_id
+                if c.container_id == tgt_vue:
+                    tgt = c.container_id
+            if src and tgt and src != tgt and src in all_node_ids and tgt in all_node_ids:
+                in_degree[tgt] = in_degree.get(tgt, 0) + 1
+                out_edges[src].append(tgt)
+
+        # 拓扑排序（层级分组）
+        queue = [nid for nid in all_node_ids if in_degree.get(nid, 0) == 0]
+        topo_levels = []
+        while queue:
+            level = list(queue)
+            queue.clear()
+            topo_levels.append(level)
+            for nid in level:
+                for tgt in out_edges.get(nid, []):
+                    in_degree[tgt] -= 1
+                    if in_degree[tgt] == 0:
+                        queue.append(tgt)
+
+        # 节点输出缓存
+        node_outputs: dict[str, str] = {}
+
+        yield {"type": "pipeline_start", "levels": len(topo_levels), "nodes": len(all_node_ids)}
+
+        for level_idx, level in enumerate(topo_levels):
+            yield {"type": "level_start", "level": level_idx + 1, "total_levels": len(topo_levels), "nodes": level}
+
+            for nid in level:
+                # 收集上游输入
+                upstream_outputs = []
+                for other_nid, targets in out_edges.items():
+                    if nid in targets and other_nid in node_outputs:
+                        upstream_outputs.append(f"[{other_nid}]:\n{node_outputs[other_nid]}")
+
+                if not upstream_outputs:
+                    input_text = json.dumps(context_input, ensure_ascii=False, indent=2)[:5000]
+                else:
+                    input_text = "\n\n---\n\n".join(upstream_outputs)
+
+                # 判断是容器还是单独专家
+                is_container = nid in self._container_map
+                if is_container:
+                    container = self._container_map[nid]
+                    pool = self._get_container_speaker_pool(container)
+                    container_history = []
+                    output_parts = []
+                    for (eid, role) in pool:
+                        expert = self.get_expert(eid, role)
+                        ctx = {
+                            "vision": context_input,
+                            "worldbook": worldbook_text,
+                            "rag": rag_context,
+                            "history": [ExpertOpinion(expert_id=op[0], expert_type=op[0], role=ExpertRole(op[1]), content=op[2]) for op in container_history],
+                            "custom_prompt": ""
+                        }
+                        if input_text and input_text.strip():
+                            ctx["custom_prompt"] = f"参考上游节点输出：\n\n{input_text}"
+                        self._inject_history_context(ctx)
+                        self._speech_count += 1
+                        yield {"type": "expert_start", "expert_id": eid, "expert_type": expert.expert_type, "role": role.value, "container_id": nid, "level": level_idx + 1}
+                        opinion = expert.speak(None, ctx)
+                        opinion.role = role
+                        container_history.append((eid, role.value, opinion.content))
+                        output_parts.append(f"### {expert.expert_type}\n{opinion.content}")
+                        yield {"type": "expert_speak", "expert_id": eid, "expert_type": expert.expert_type, "role": role.value, "content": opinion.content, "container_id": nid, "level": level_idx + 1}
+                    node_outputs[nid] = "\n\n".join(output_parts)
+                else:
+                    # 单独专家节点
+                    experts = node_map.get(nid, [])
+                    if experts:
+                        exp = experts[0]
+                        expert = self.get_expert(exp["expert_id"], ExpertRole(exp["role"]))
+                        ctx = {
+                            "vision": context_input,
+                            "worldbook": worldbook_text,
+                            "rag": rag_context,
+                            "history": [],
+                            "custom_prompt": (exp.get("custom_prompt") or "")
+                        }
+                        # 将上游输出注入为自定义 prompt
+                        if input_text and input_text.strip():
+                            ctx["custom_prompt"] = f"上一节点的输出请在处理时参考：\n\n{input_text}\n\n---\n{ctx['custom_prompt']}"
+                        self._speech_count += 1
+                        yield {"type": "expert_start", "expert_id": exp["expert_id"], "expert_type": expert.expert_type, "role": exp["role"], "node_id": nid, "level": level_idx + 1}
+                        opinion = expert.speak(None, ctx)
+                        opinion.role = ExpertRole(exp["role"])
+                        node_outputs[nid] = opinion.content
+                        yield {"type": "expert_speak", "expert_id": exp["expert_id"], "expert_type": expert.expert_type, "role": exp["role"], "content": opinion.content, "node_id": nid, "level": level_idx + 1}
+                    else:
+                        yield {"type": "node_skip", "node_id": nid, "reason": "no expert"}
+
+                if human_feedback:
+                    pass  # 管道模式下不阻塞，用户通过停止按钮控制
+
+            yield {"type": "level_complete", "level": level_idx + 1}
+
+        self._state = "completed"
+        output = {"node_outputs": node_outputs, "total_speeches": self._speech_count}
+        yield {"type": "pipeline_complete", "output": output}
+        return output
 
 
 # ── 预置模板 ────────────────────────────────────────────────

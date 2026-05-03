@@ -41,6 +41,7 @@ class ExpertConfigRequest(BaseModel):
     role: Literal["main", "review", "supplement"] = "main"
     custom_prompt: Optional[str] = None
     container_id: Optional[str] = None
+    node_id: Optional[str] = None
     interrupt_mode: Literal["auto", "every_n_msgs", "every_n_tokens", "on_mention"] = "every_n_msgs"
     interrupt_threshold: int = 1
 
@@ -69,6 +70,8 @@ class MeetingStartRequest(BaseModel):
     meeting_name: str = "专家会议"
     experts: list[ExpertConfigRequest]
     containers: list[ContainerConfigRequest] = []
+    edges: list[dict] = []
+    pipeline: bool = False
 
 
 class MeetingFeedback(BaseModel):
@@ -300,7 +303,7 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
         vision = json.load(f)
 
     expert_configs = [
-        ExpertConfig(expert_id=e.expert_id, role=ExpertRole(e.role), custom_prompt=e.custom_prompt, container_id=e.container_id, interrupt_mode=e.interrupt_mode, interrupt_threshold=e.interrupt_threshold)
+        ExpertConfig(expert_id=e.expert_id, role=ExpertRole(e.role), custom_prompt=e.custom_prompt, container_id=e.container_id, node_id=e.node_id, interrupt_mode=e.interrupt_mode, interrupt_threshold=e.interrupt_threshold)
         for e in request.experts
     ]
 
@@ -332,6 +335,7 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
         granularity=Granularity("chapter"),
         experts=expert_configs,
         containers=container_configs,
+        edges=request.edges,
         collaboration_mode="semi_auto",
         max_rounds=3,
         max_speeches=0
@@ -342,11 +346,12 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
 
     worldbook_text = _load_worldbook(project.project_path)
 
+    use_pipeline = getattr(request, 'pipeline', False)
+
     async def generate():
         feedback_queue: asyncio.Queue = asyncio.Queue()
         _pending_feedback[project_id] = feedback_queue
 
-        # Shared feedback state for engine
         feedback_state = {"action": None, "message": "", "expert_id": None}
 
         def human_feedback():
@@ -364,14 +369,16 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
             except asyncio.TimeoutError:
                 yield sse_format("timeout", {"message": "等待用户反馈超时"})
 
+        runner = engine.run_pipeline if use_pipeline else engine.run
+
         try:
-            for event in engine.run(vision, worldbook_text, human_feedback=human_feedback):
+            for event in runner(vision, worldbook_text, human_feedback=human_feedback):
                 if event["type"] == "expert_speak":
                     logger.log_meeting(
                         project_id=project_id,
-                        expert_id=event["expert_id"],
-                        expert_type=event["expert_type"],
-                        content=event["content"],
+                        expert_id=event.get("expert_id", ""),
+                        expert_type=event.get("expert_type", ""),
+                        content=event.get("content", ""),
                         suggestions=event.get("suggestions", []),
                         round=engine.current_round
                     )

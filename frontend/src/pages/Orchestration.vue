@@ -12,7 +12,7 @@
     <div v-if="viewMode !== 'canvas'" class="meeting-view">
       <div class="meeting-header">
         <button class="btn btn-outline" @click="backToCanvas">← 画布</button>
-        <h2>{{ meetingConfig.meeting_name || '专家会议' }}</h2>
+        <h2>{{ activeChatTitle }}</h2>
         <button v-if="isRunning" class="btn btn-warning btn-sm" @click="stopMeeting">停止</button>
       </div>
 
@@ -107,19 +107,31 @@ let chatChannel = null
 
 const chatGroups = computed(() => {
   const groups = []
+  // 容器群聊
   for (const c of (meetingConfig.value.containers || [])) {
     const key = c.container_id
     const msgs = messagesByContainer[key] || []
-    const unread = readMessages[key] != null ? msgs.length - 1 - (readMessages[key] || 0) : 0
-    groups.push({ key, name: c.name || '容器', icon: '📦', unread: Math.max(0, unread) })
+    groups.push({ key, name: c.name || '容器', icon: '📦', unread: msgs.length })
   }
-  const soloMsgs = messagesByContainer['solo'] || []
-  const soloUnread = readMessages['solo'] != null ? soloMsgs.length - 1 - (readMessages['solo'] || 0) : 0
-  groups.unshift({ key: 'solo', name: '主聊天', icon: '💬', unread: Math.max(0, soloUnread) })
+  // 独立专家
+  const seen = new Set(groups.map(g => g.key))
+  for (const exp of (meetingConfig.value.experts || [])) {
+    if (exp.container_id) continue
+    const key = exp.expert_id
+    if (seen.has(key)) continue
+    seen.add(key)
+    const msgs = messagesByContainer[key] || []
+    groups.push({ key, name: getExpertLabel(key) || key, icon: '💬', unread: msgs.length })
+  }
   return groups
 })
 
 const activeMessages = computed(() => messagesByContainer[activeChat.value] || [])
+
+const activeChatTitle = computed(() => {
+  const g = chatGroups.value.find(c => c.key === activeChat.value)
+  return g ? g.name : (meetingConfig.value.meeting_name || '专家会议')
+})
 
 function onCanvasRun(config) {
   meetingConfig.value = config
@@ -141,20 +153,21 @@ function stopMeeting() {
   viewMode.value = 'canvas'
 }
 
-function openNodeChat({ containerId, newWindow }) {
+function openNodeChat({ containerId, expertId, newWindow }) {
   if (!isRunning.value) return
-  const cid = containerId || 'solo'
+  const cid = containerId || expertId || 'solo'
   if (newWindow) {
-    const name = meetingConfig.value.containers.find(c => c.container_id === cid)?.name || cid
+    const c = meetingConfig.value.containers.find(x => x.container_id === cid)
+    const name = c?.name || getExpertLabel(cid) || cid
     window.open(`/chat-popup?containerId=${cid}&name=${encodeURIComponent(name)}`, '_blank', 'width=500,height=700')
   } else {
     viewMode.value = 'running'
-    if (containerId) activeChat.value = containerId
+    activeChat.value = cid
   }
 }
 
 function routeMessage(msg) {
-  const cid = msg.container_id || 'solo'
+  const cid = msg.container_id || msg.expert_id || 'solo'
   if (!messagesByContainer[cid]) messagesByContainer[cid] = []
   messagesByContainer[cid].push(msg)
   if (activeChat.value === cid) markRead(cid)
@@ -176,13 +189,23 @@ function markRead(cid) {
 
 watch(activeChat, (cid) => { if (cid) markRead(cid) })
 
+watch(chatGroups, (groups) => {
+  if (!activeChat.value && groups.length > 0) {
+    activeChat.value = groups[0].key
+  }
+}, { immediate: true })
+
 async function startMeeting() {
   for (const key of Object.keys(messagesByContainer)) delete messagesByContainer[key]
   for (const key of Object.keys(readMessages)) delete readMessages[key]
-  activeChat.value = 'solo'
+  activeChat.value = ''
   currentRound.value = 0
   meetingOutput.value = null
   isRunning.value = true
+  // 选中第一个标签
+  nextTick(() => {
+    if (chatGroups.value.length > 0) activeChat.value = chatGroups.value[0].key
+  })
 
   const url = `/api/projects/${projectId.value}/meeting/start`
   try {
@@ -214,13 +237,34 @@ async function startMeeting() {
 
 function handleSSEEvent(type, data) {
   switch (type) {
+    case 'pipeline_start':
+      routeMessage({ type: 'system', content: `管道启动 · ${data.nodes} 个节点`, timestamp: new Date().toISOString() })
+      break
+    case 'level_start':
+      routeMessage({ type: 'system', content: `── 第 ${data.level}/${data.total_levels} 层 ──`, timestamp: new Date().toISOString() })
+      break
+    case 'level_complete':
+      break
+    case 'pipeline_complete':
+      meetingOutput.value = data.output
+      routeMessage({ type: 'system', content: '管道完成', timestamp: new Date().toISOString() })
+      isRunning.value = false
+      if (chatChannel) { chatChannel.postMessage({ type: 'done' }); chatChannel.close(); chatChannel = null }
+      break
+    case 'pipeline_stopped':
+      routeMessage({ type: 'system', content: `管道在 ${data.node_id} 处停止`, timestamp: new Date().toISOString() })
+      isRunning.value = false
+      if (chatChannel) chatChannel.postMessage({ type: 'done' })
+      break
+    case 'node_skip':
+      break
     case 'round_start':
       currentRound.value = data.round || (currentRound.value + 1)
       routeMessage({ type: 'system', content: `--- 第 ${currentRound.value} 轮 ---`, timestamp: new Date().toISOString() })
       break
     case 'expert_speak':
       speechCount.value = data.speech_count || speechCount.value
-      routeMessage({ type: 'expert', expert_type: data.expert_type, content: data.content, container_id: data.container_id, timestamp: new Date().toISOString() })
+      routeMessage({ type: 'expert', expert_type: data.expert_type, content: data.content, container_id: data.container_id || data.node_id, expert_id: data.expert_id, timestamp: new Date().toISOString() })
       if (data.mention) routeMessage({ type: 'system', content: `→ @${getExpertLabel(data.mention)} 被提及`, container_id: data.container_id, timestamp: new Date().toISOString() })
       break
     case 'summarizer':
@@ -288,7 +332,7 @@ function formatTime(ts) { return ts ? new Date(ts).toLocaleTimeString('zh-CN') :
 
 <style scoped>
 .orchestration-meeting { height: calc(100vh - 42px); display: flex; overflow: hidden; }
-.canvas-view { min-width: 0; overflow: hidden; display: flex; flex-direction: column; flex: 3; }
+.canvas-view { min-width: 0; min-height: 200px; overflow: hidden; display: flex; flex-direction: column; flex: 3; }
 .canvas-view:only-child { flex: 1; }
 
 .meeting-view { flex: 2; display: flex; flex-direction: column; overflow: hidden; min-width: 400px; border-left: 2px solid #3498db; }

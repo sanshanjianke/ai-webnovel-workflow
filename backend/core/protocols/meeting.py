@@ -55,6 +55,7 @@ class ExpertConfig(BaseModel):
     role: ExpertRole = ExpertRole.MAIN
     custom_prompt: Optional[str] = None
     container_id: Optional[str] = None
+    node_id: Optional[str] = None
     interrupt_mode: Literal["auto", "every_n_msgs", "every_n_tokens", "on_mention"] = "every_n_msgs"
     interrupt_threshold: int = 1  # N messages or ~N tokens
 
@@ -64,6 +65,7 @@ class MeetingConfig(BaseModel):
     granularity: Granularity = Granularity.CHAPTER
     experts: list[ExpertConfig]
     containers: list[ContainerConfig] = []
+    edges: list[dict] = []
     collaboration_mode: Literal["semi_auto", "full_auto", "manual"] = "semi_auto"
     max_rounds: int = 3
     max_speeches: int = 0  # 0 = unlimited, >0 = auto-stop after N speeches
