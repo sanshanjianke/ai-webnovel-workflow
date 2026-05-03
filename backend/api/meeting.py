@@ -18,6 +18,7 @@ router = APIRouter()
 CUSTOM_EXPERTS_DIR = Path("data/user/custom_experts")
 
 _pending_feedback: dict[str, asyncio.Queue] = {}
+_pipeline_stop: dict[str, bool] = {}
 
 DISCOVERED = False
 
@@ -360,11 +361,16 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
         # 管道模式：同步生成器（像 L1 聊天），在独立线程中运行避免阻塞事件循环
         def pipeline_stream():
             try:
-                files = queue_files if queue_files else [None]  # None = 用 vision
+                _pipeline_stop[project_id] = False
+                files = queue_files if queue_files else [None]
 
                 yield f"data: {json.dumps({'type': 'queue_start', 'total': len(files)}, ensure_ascii=False)}\n\n"
 
                 for qi, file_content in enumerate(files):
+                    if _pipeline_stop.get(project_id):
+                        yield f"data: {json.dumps({'type': 'pipeline_stopped', 'node_id': f'queue_{qi}'}, ensure_ascii=False)}\n\n"
+                        break
+
                     ctx = vision.copy()
                     if file_content:
                         ctx["queue_input"] = file_content
@@ -374,6 +380,9 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
                     yield f"data: {json.dumps({'type': 'queue_item_start', 'index': qi, 'total': len(files)}, ensure_ascii=False)}\n\n"
 
                     for event in engine.run_pipeline(ctx, worldbook_text):
+                        if _pipeline_stop.get(project_id):
+                            yield f"data: {json.dumps({'type': 'pipeline_stopped', 'node_id': event.get('node_id', '')}, ensure_ascii=False)}\n\n"
+                            break
                         event["queue_index"] = qi
                         event["queue_total"] = len(files)
                         if event["type"] == "expert_speak":
@@ -387,15 +396,18 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
                             )
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
-                    yield f"data: {json.dumps({'type': 'queue_item_complete', 'index': qi, 'total': len(files)}, ensure_ascii=False)}\n\n"
+                    if not _pipeline_stop.get(project_id):
+                        yield f"data: {json.dumps({'type': 'queue_item_complete', 'index': qi, 'total': len(files)}, ensure_ascii=False)}\n\n"
 
-                if queue_files:
+                if queue_files and not _pipeline_stop.get(project_id):
                     logger.log_version(project_id, "pipeline", {"queue_total": len(files)}, "Batch pipeline completed")
                 yield f"data: {json.dumps({'type': 'queue_complete', 'total': len(files)}, ensure_ascii=False)}\n\n"
             except Exception as e:
                 import traceback
                 traceback.print_exc()
                 yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
+            finally:
+                _pipeline_stop.pop(project_id, None)
 
         return StreamingResponse(
             pipeline_stream(),
@@ -492,6 +504,9 @@ async def meeting_stream(project_id: str, preset: str = "chapter_design"):
 
 @router.post("/projects/{project_id}/meeting/feedback")
 async def meeting_feedback(project_id: str, data: MeetingFeedback):
+    if data.action == "stop" and project_id in _pipeline_stop:
+        _pipeline_stop[project_id] = True
+        return {"status": "pipeline_stopping"}
     queue = _pending_feedback.get(project_id)
     if queue is None:
         raise HTTPException(status_code=404, detail="No active meeting for this project")
