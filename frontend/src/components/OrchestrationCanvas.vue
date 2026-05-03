@@ -794,17 +794,19 @@ function onDrop(event) {
   const raw = event.dataTransfer.getData('application/json')
   if (!raw) return
   const data = JSON.parse(raw)
-  if (data.layer && data.uid) {
-    if (data.layer === 'orchestration') loadDesignByUid(data.uid)
+
+  // 编排设计文档 → 加载设计
+  if (data.layer === 'orchestration' && data.uid) {
+    loadDesignByUid(data.uid)
     return
   }
+
   // 从文档库拖入文档 → 添加到输入源队列
-  const docUid = event.dataTransfer.getData('text/plain')
-  const docName = event.dataTransfer.getData('document-name')
-  if (docUid && docName) {
-    addDocumentToInputSource(docUid, docName)
+  if (data.uid && (data.layer || data.format)) {
+    addDocumentToInputSource(data.uid, data.name || '未命名')
     return
   }
+
   if (!data.expertId) return
   const canvasEl = event.target.closest('.vue-flow')
   if (!canvasEl) return
