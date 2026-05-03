@@ -1212,8 +1212,6 @@ function openChatNewWindow() {
   window.open(`/chat-popup?${params}`, '_blank')
   nodeCtx.show = false
 }
-  nodeCtx.show = false
-}
 
 function openChatInline() {
   // 统一为新窗口打开
