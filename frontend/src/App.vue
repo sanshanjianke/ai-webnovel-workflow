@@ -51,7 +51,7 @@ const currentProjectId = computed(() => route.query.projectId)
 
 const showSidebar = computed(() => {
   const path = route.path
-  return path !== '/' && path !== '/settings' && currentProjectId.value
+  return path !== '/' && path !== '/settings' && path !== '/chat-popup' && currentProjectId.value
 })
 
 const navLink = (path) => {
