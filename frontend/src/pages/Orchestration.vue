@@ -26,10 +26,10 @@ const projectId = computed(() => route.query.projectId || '')
 
 const isRunning = ref(false)
 const speechCount = ref(0)
-const messageBuffer = reactive({})  // { cid: [messages] }
+const messageBuffer = reactive({})
+const queueState = ref({ index: 0, total: 0 })
 let chatChannel = null
 
-// 启动时建立 BroadcastChannel 并监听 sync 请求
 onMounted(() => {
   chatChannel = new BroadcastChannel('meeting-chat')
   chatChannel.onmessage = (event) => {
@@ -37,6 +37,10 @@ onMounted(() => {
       const msgs = messageBuffer[event.data.targetId] || []
       for (const m of msgs) {
         chatChannel.postMessage({ type: 'message', data: m, timestamp: m.timestamp })
+      }
+      // 同步队列状态
+      if (queueState.value.total > 0) {
+        chatChannel.postMessage({ type: 'queue_state', data: queueState.value })
       }
     }
   }
@@ -105,8 +109,11 @@ function handleSSEEvent(type, data) {
   switch (type) {
     case 'queue_start':
     case 'queue_item_start':
-    case 'queue_item_complete':
+      queueState.value = { index: (data.index || 0) + 1, total: data.total || 0 }
+      broadcast(type, data)
+      break
     case 'queue_complete':
+      queueState.value = { index: data.total || 0, total: data.total || 0 }
       broadcast(type, data)
       break
     case 'expert_speak':

@@ -1173,15 +1173,17 @@ function onNodeDoubleClick({ node }) {
 }
 
 function openNodeChatTab(node) {
-  let params = ''
+  let params = `projectId=${encodeURIComponent(props.projectId || '')}`
   if (node.type === 'container') {
-    params = `containerId=${encodeURIComponent(node.id)}&name=${encodeURIComponent(node.data.name || '容器')}`
+    params += `&containerId=${encodeURIComponent(node.id)}&name=${encodeURIComponent(node.data.name || '容器')}`
   } else if (node.type === 'expert') {
     const eid = node.data.expertId
     const label = getExpertLabel(eid) || eid
-    params = `expertId=${encodeURIComponent(eid)}&name=${encodeURIComponent(label)}`
+    params += `&expertId=${encodeURIComponent(eid)}&name=${encodeURIComponent(label)}`
     if (node.parentNode) params += `&containerId=${encodeURIComponent(node.parentNode)}`
   }
+  window.open(`/chat-popup?${params}`, '_blank')
+}
   window.open(`/chat-popup?${params}`, '_blank')  // 新标签页
 }
 
@@ -1197,18 +1199,21 @@ function onNodeContextMenu({ event, node }) {
 
 function openChatNewWindow() {
   const n = nodeCtx
+  let params = `projectId=${encodeURIComponent(props.projectId || '')}`
   if (n.type === 'container') {
     const c = nodes.value.find(x => x.id === n.nodeId)
     const name = c?.data?.name || '容器'
-    window.open(`/chat-popup?containerId=${encodeURIComponent(n.nodeId)}&name=${encodeURIComponent(name)}`, '_blank')
+    params += `&containerId=${encodeURIComponent(n.nodeId)}&name=${encodeURIComponent(name)}`
   } else {
     const eid = n.nodeData?.expertId
     const label = getExpertLabel(eid) || eid
-    let params = `expertId=${encodeURIComponent(eid)}&name=${encodeURIComponent(label)}`
+    params += `&expertId=${encodeURIComponent(eid)}&name=${encodeURIComponent(label)}`
     const expertNode = nodes.value.find(x => x.id === n.nodeId)
     if (expertNode?.parentNode) params += `&containerId=${encodeURIComponent(expertNode.parentNode)}`
-    window.open(`/chat-popup?${params}`, '_blank')
   }
+  window.open(`/chat-popup?${params}`, '_blank')
+  nodeCtx.show = false
+}
   nodeCtx.show = false
 }
 

@@ -6,6 +6,7 @@
       <span class="popup-status stopped" v-else>已完成</span>
     </div>
     <div class="popup-body">
+      <DocumentSidebar v-if="projectId" :projectId="projectId" class="popup-library" />
       <div class="queue-sidebar" v-if="queueState.total >= 1">
         <div class="queue-sidebar-header">📥 队列</div>
         <div v-for="i in queueState.total" :key="i"
@@ -18,6 +19,10 @@
           <span>文件 {{ i }}</span>
         </div>
       </div>
+      <div class="popup-messages" ref="msgEl">
+        <div v-if="messages.length === 0" class="empty-hint">
+          等待消息...<br><small>在编排画布上运行管道后，消息将在此显示</small>
+        </div>
       <div class="popup-messages" ref="msgEl">
         <div v-if="messages.length === 0" class="empty-hint">
           等待消息...<br><small>在编排画布上运行管道后，消息将在此显示</small>
@@ -45,10 +50,12 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import MarkdownIt from 'markdown-it'
+import DocumentSidebar from '../components/library/DocumentSidebar.vue'
 
 const route = useRoute()
 const md = new MarkdownIt()
 const targetId = computed(() => route.query.containerId || route.query.expertId || 'solo')
+const projectId = computed(() => route.query.projectId || '')
 const title = computed(() => route.query.name || (targetId.value === 'solo' ? '主聊天' : targetId.value))
 const messages = ref([])
 const isRunning = ref(true)
@@ -83,6 +90,11 @@ onMounted(() => {
       for (let i = msgs.length - 1; i >= 0; i--) {
         if (msgs[i].streaming) { msgs[i].streaming = false; break }
       }
+      return
+    }
+
+    if (type === 'queue_state') {
+      queueState.value = data || { index: 0, total: 0 }
       return
     }
 
@@ -181,6 +193,7 @@ onUnmounted(() => {
 .popup-header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: white; border-bottom: 1px solid #e0e0e0; flex-shrink: 0; }
 .popup-body { flex: 1; display: flex; overflow: hidden; }
 .queue-sidebar { width: 140px; flex-shrink: 0; padding: 12px 8px; border-right: 1px solid #e0e0e0; background: #fafafa; overflow-y: auto; }
+.popup-library { width: 240px; flex-shrink: 0; border-right: 1px solid #e0e0e0; overflow-y: auto; }
 .queue-sidebar-header { font-size: 0.8rem; font-weight: 600; color: #666; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #eee; }
 .queue-sidebar-item { display: flex; align-items: center; gap: 6px; padding: 4px 6px; font-size: 0.78rem; border-radius: 4px; margin-bottom: 2px; }
 .queue-sidebar-item.current { background: #e8f4fd; color: #3498db; font-weight: 600; }
