@@ -1058,7 +1058,7 @@ function openNodeChatTab(node) {
     params = `expertId=${encodeURIComponent(eid)}&name=${encodeURIComponent(label)}`
     if (node.parentNode) params += `&containerId=${encodeURIComponent(node.parentNode)}`
   }
-  window.open(`/chat-popup?${params}`, `chat_${node.id}`, 'width=600,height=800')
+  window.open(`/chat-popup?${params}`, '_blank')  // 新标签页
 }
 
 function onNodeContextMenu({ event, node }) {
@@ -1076,14 +1076,14 @@ function openChatNewWindow() {
   if (n.type === 'container') {
     const c = nodes.value.find(x => x.id === n.nodeId)
     const name = c?.data?.name || '容器'
-    window.open(`/chat-popup?containerId=${encodeURIComponent(n.nodeId)}&name=${encodeURIComponent(name)}`, `chat_${n.nodeId}`, 'width=600,height=800')
+    window.open(`/chat-popup?containerId=${encodeURIComponent(n.nodeId)}&name=${encodeURIComponent(name)}`, '_blank')
   } else {
     const eid = n.nodeData?.expertId
     const label = getExpertLabel(eid) || eid
     let params = `expertId=${encodeURIComponent(eid)}&name=${encodeURIComponent(label)}`
     const expertNode = nodes.value.find(x => x.id === n.nodeId)
     if (expertNode?.parentNode) params += `&containerId=${encodeURIComponent(expertNode.parentNode)}`
-    window.open(`/chat-popup?${params}`, `chat_${n.nodeId}`, 'width=600,height=800')
+    window.open(`/chat-popup?${params}`, '_blank')
   }
   nodeCtx.show = false
 }

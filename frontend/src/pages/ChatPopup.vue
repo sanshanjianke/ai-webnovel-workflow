@@ -6,6 +6,9 @@
       <span class="popup-status stopped" v-else>已完成</span>
     </div>
     <div class="popup-messages" ref="msgEl">
+      <div v-if="messages.length === 0" class="empty-hint">
+        等待消息...<br><small>在编排画布上运行管道后，消息将在此显示</small>
+      </div>
       <div v-for="(msg, idx) in messages" :key="idx"
         :class="['message', msg.type]">
         <div class="message-header">
@@ -133,8 +136,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.chat-popup { height: 100vh; display: flex; flex-direction: column; background: #f5f5f5; }
-.popup-header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: white; border-bottom: 1px solid #e0e0e0; }
+.chat-popup { height: calc(100vh - 42px); display: flex; flex-direction: column; background: #f5f5f5; overflow: hidden; }
+.popup-header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: white; border-bottom: 1px solid #e0e0e0; flex-shrink: 0; }
 .popup-header h2 { margin: 0; font-size: 1rem; }
 .popup-status { font-size: 0.75rem; color: #27ae60; font-weight: 600; }
 .popup-status.stopped { color: #999; }
@@ -148,5 +151,6 @@ onUnmounted(() => {
 .timestamp { margin-left: auto; font-size: 0.75rem; color: #999; }
 .message-content { line-height: 1.6; font-size: 0.9rem; }
 .streaming-cursor { display: inline; animation: blink 0.8s infinite; color: #3498db; font-weight: bold; }
+.empty-hint { text-align: center; color: #999; padding: 3rem 1rem; font-size: 0.9rem; line-height: 1.8; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
 </style>
