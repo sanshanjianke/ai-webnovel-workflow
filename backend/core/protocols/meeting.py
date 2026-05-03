@@ -42,6 +42,8 @@ class ContainerConfig(BaseModel):
     exit_ratio: float = 0.6
     exit_gatekeeper: Optional[str] = None
     exit_max_speeches: int = 20
+    worldbook_bindings: list[str] = []
+    rag_bindings: list[str] = []
     children: list[str] = []
     edges: list[dict] = []
 

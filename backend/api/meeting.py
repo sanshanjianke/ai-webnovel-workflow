@@ -55,6 +55,8 @@ class ContainerConfigRequest(BaseModel):
     exit_ratio: float = 0.6
     exit_gatekeeper: Optional[str] = None
     exit_max_speeches: int = 20
+    worldbook_bindings: list[str] = []
+    rag_bindings: list[str] = []
     children: list[str] = []
     edges: list[dict] = []
 
@@ -261,6 +263,8 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
             exit_ratio=c.exit_ratio,
             exit_gatekeeper=c.exit_gatekeeper,
             exit_max_speeches=c.exit_max_speeches,
+            worldbook_bindings=c.worldbook_bindings,
+            rag_bindings=c.rag_bindings,
             children=c.children,
             edges=c.edges,
         )

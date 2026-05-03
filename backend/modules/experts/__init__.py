@@ -437,3 +437,56 @@ class ChapterSplitterV1(BaseConfigurableExpert):
             expert_id=self.expert_id, expert_type=self.expert_type,
             role=self._role, content=content, suggestions=suggestions
         )
+
+
+@register_module("expert")
+class DiscussionSummarizerV1(BaseConfigurableExpert):
+    @property
+    def expert_id(self) -> str:
+        return "discussion_summarizer_v1"
+
+    @property
+    def expert_type(self) -> str:
+        return "讨论总结师"
+
+    def speak(self, outline, context: dict) -> ExpertOpinion:
+        llm = _get_llm()
+        vision_text = _format_vision(context.get("vision", {}))
+        history = context.get("history", [])
+        container_context = context.get("container_context", "")
+        user_feedback = context.get("user_feedback", "")
+        custom_prompt = context.get("custom_prompt", "")
+
+        history_text = ""
+        if history:
+            history_text = "\n\n---\n\n".join([
+                f"[{op.expert_type}] ({op.role.value})\n{op.content}"
+                for op in history[-6:]
+            ])
+
+        prompt = f"""你是讨论总结师，负责在群聊讨论中定期总结和提炼。你的职责不是提出新观点，而是收束已有讨论：
+
+- 提炼共识：哪些观点大家已经达成一致？
+- 标注分歧：哪些问题还有不同意见？
+- 格式化输出：确保讨论保持在结构化的轨道上
+
+{ROLE_INSTRUCTIONS.get(self._role, "")}
+
+故事愿景：
+{vision_text}
+
+{f"已有讨论：\n{history_text}" if history_text else ""}
+{f"容器上下文：{container_context}" if container_context else ""}
+{f"用户反馈：{user_feedback}" if user_feedback else ""}
+{f"自定义指令：{custom_prompt}" if custom_prompt else ""}
+
+请简洁总结。用「共识」「分歧」「建议」三个小节。每节不超过3句话。"""
+
+        content = llm.invoke(prompt, temperature=0.5)
+        suggestions = []
+        if "共识" in content: suggestions.append("包含共识提炼")
+        if "分歧" in content: suggestions.append("包含分歧标注")
+        return ExpertOpinion(
+            expert_id=self.expert_id, expert_type=self.expert_type,
+            role=self._role, content=content, suggestions=suggestions
+        )

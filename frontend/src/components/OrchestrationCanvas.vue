@@ -166,6 +166,19 @@
           </label>
           <input v-if="containerCfg.use_tokens" v-model.number="containerCfg.context_tokens" type="number" min="1000" max="1000000" step="10000" placeholder="token数" @change="onContainerChange" style="width:100px;margin-left:8px;" />
         </div>
+
+        <div class="config-section">
+          <label class="section-label">数据绑定（暂留接口）</label>
+        </div>
+        <div class="config-field">
+          <label>世界书（逗号分隔）</label>
+          <input v-model="containerCfg.worldbook_bindings" placeholder="核心设定, 角色追踪" @change="onContainerChange" />
+        </div>
+        <div class="config-field">
+          <label>RAG（逗号分隔）</label>
+          <input v-model="containerCfg.rag_bindings" placeholder="历史回顾, 技法参考" @change="onContainerChange" />
+        </div>
+
         <div class="config-actions">
           <button class="btn btn-danger btn-sm" @click="removeNode">删除容器</button>
         </div>
@@ -338,7 +351,8 @@ const containerCfg = reactive({
   use_layers: false, context_layers: null,
   use_tokens: false, context_tokens: null,
   repeat: 1,
-  exit_mode: 'manual', exit_ratio: 0.6, exit_gatekeeper: null, exit_max_speeches: 20
+  exit_mode: 'manual', exit_ratio: 0.6, exit_gatekeeper: null, exit_max_speeches: 20,
+  worldbook_bindings: '', rag_bindings: ''
 })
 
 const containerChildren = computed(() => {
@@ -354,7 +368,8 @@ const availableExperts = {
   plot_architect_v1: { label: '剧情架构师', icon: '🏛', desc: '逻辑/功能拆解' },
   character_designer_v1: { label: '人物设计师', icon: '🎭', desc: 'OOC/行动元' },
   web_editor_v1: { label: '网络编辑', icon: '💼', desc: '爽点/毒点' },
-  chapter_splitter_v1: { label: '章节拆分师', icon: '✂️', desc: '卷纲→章节目录' }
+  chapter_splitter_v1: { label: '章节拆分师', icon: '✂️', desc: '卷纲→章节目录' },
+  discussion_summarizer_v1: { label: '讨论总结师', icon: '📋', desc: '提炼共识/标注分歧' }
 }
 
 const presets = [
@@ -585,6 +600,10 @@ function onContainerChange() {
     selectedNode.value.data.exit_ratio = containerCfg.exit_ratio
     selectedNode.value.data.exit_gatekeeper = containerCfg.exit_gatekeeper
     selectedNode.value.data.exit_max_speeches = containerCfg.exit_max_speeches
+    selectedNode.value.data.worldbook_bindings = containerCfg.worldbook_bindings
+      .split(',').map(s => s.trim()).filter(Boolean)
+    selectedNode.value.data.rag_bindings = containerCfg.rag_bindings
+      .split(',').map(s => s.trim()).filter(Boolean)
     updateContainerChildren()
   }
 }
@@ -602,6 +621,8 @@ function loadContainerConfig(node) {
   containerCfg.exit_ratio = node.data.exit_ratio ?? 0.6
   containerCfg.exit_gatekeeper = node.data.exit_gatekeeper ?? null
   containerCfg.exit_max_speeches = node.data.exit_max_speeches ?? 20
+  containerCfg.worldbook_bindings = (node.data.worldbook_bindings || []).join(', ')
+  containerCfg.rag_bindings = (node.data.rag_bindings || []).join(', ')
 }
 
 // ── 发言顺序计算 ──
@@ -666,6 +687,8 @@ function runMeeting() {
       exit_ratio: n.data.exit_ratio ?? 0.6,
       exit_gatekeeper: n.data.exit_gatekeeper ?? null,
       exit_max_speeches: n.data.exit_max_speeches ?? 20,
+      worldbook_bindings: n.data.worldbook_bindings || [],
+      rag_bindings: n.data.rag_bindings || [],
       mention_isolation: n.data.mention_isolation !== false,
       children: n.data.children || [],
       edges: edges.value
@@ -737,6 +760,7 @@ function addContainer() {
       context_layers: null, context_tokens: null,
       repeat: 1,
       exit_mode: 'manual', exit_ratio: 0.6, exit_gatekeeper: null, exit_max_speeches: 20,
+      worldbook_bindings: [], rag_bindings: [],
       children: [], width: 520, height: 280
     },
     style: { zIndex: 0 }
