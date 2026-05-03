@@ -1184,8 +1184,6 @@ function openNodeChatTab(node) {
   }
   window.open(`/chat-popup?${params}`, '_blank')
 }
-  window.open(`/chat-popup?${params}`, '_blank')  // 新标签页
-}
 
 function onNodeContextMenu({ event, node }) {
   event.preventDefault()
