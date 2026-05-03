@@ -14,6 +14,7 @@
           <span class="timestamp">{{ formatTime(msg.timestamp) }}</span>
         </div>
         <div class="message-content" v-html="renderMarkdown(msg.content)"></div>
+        <span v-if="msg.streaming" class="streaming-cursor">▊</span>
       </div>
     </div>
   </div>
@@ -40,23 +41,91 @@ function getIcon(msg) {
 function renderMarkdown(text) { return text ? md.render(text) : '' }
 function formatTime(ts) { return ts ? new Date(ts).toLocaleTimeString('zh-CN') : '' }
 
+function matchesTarget(data) {
+  const cid = data.container_id || data.expert_id || 'solo'
+  if (cid === targetId.value) return true
+  // 也检查 node_id（管道模式独立节点）
+  if (data.node_id === targetId.value) return true
+  return false
+}
+
 onMounted(() => {
   channel = new BroadcastChannel('meeting-chat')
   channel.onmessage = (event) => {
-    const { type, msg } = event.data || {}
-    if (type === 'message' && msg) {
-      const cid = msg.container_id || 'solo'
-      if (cid === targetId.value) {
-        messages.value.push(msg)
-        nextTick(() => { if (msgEl.value) msgEl.value.scrollTop = msgEl.value.scrollHeight })
-      }
-    } else if (type === 'done') {
+    const { type, data, timestamp } = event.data || {}
+    if (!type) return
+
+    if (type === 'done') {
       isRunning.value = false
+      // 结束当前流的消息
+      const msgs = messages.value
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].streaming) { msgs[i].streaming = false; break }
+      }
+      return
     }
+
+    if (type === 'expert_start') {
+      if (!matchesTarget(data)) return
+      // 创建流式占位
+      messages.value.push({
+        type: 'expert', expert_type: data.expert_type,
+        expert_id: data.expert_id, content: '', streaming: true,
+        timestamp: timestamp || new Date().toISOString()
+      })
+      scrollDown()
+      return
+    }
+
+    if (type === 'chunk') {
+      if (!matchesTarget(data)) return
+      const msgs = messages.value
+      let last = msgs.length > 0 ? msgs[msgs.length - 1] : null
+      if (!last || !last.streaming) {
+        last = { type: 'expert', expert_type: data.expert_type || '', content: '', streaming: true,
+          timestamp: timestamp || new Date().toISOString() }
+        msgs.push(last)
+      }
+      if (data.chunk_type === 'content') {
+        last.content += data.content || ''
+      }
+      scrollDown()
+      return
+    }
+
+    if (type === 'message') {
+      if (!matchesTarget(data)) return
+      const msgs = messages.value
+      let last = msgs.length > 0 ? msgs[msgs.length - 1] : null
+      // 如果是 expert_speak 且有流式消息，定型之
+      if (data.type === 'expert' && last && last.streaming) {
+        last.content = data.content || last.content
+        last.streaming = false
+        last.expert_type = data.expert_type || last.expert_type
+      } else {
+        messages.value.push({ ...data, timestamp: timestamp || data.timestamp || new Date().toISOString() })
+      }
+      isRunning.value = data.type !== 'pipeline_complete' && data.type !== 'expert' && data.type !== 'done'
+      scrollDown()
+      return
+    }
+
+    // 其他事件（level_start 等）
+    if (!matchesTarget(data)) return
+    messages.value.push({
+      type: 'system', content: data.content || JSON.stringify(data).slice(0, 120),
+      timestamp: timestamp || new Date().toISOString()
+    })
+    scrollDown()
   }
-  // Request existing messages from main window
+
+  // 请求同步已有消息
   channel.postMessage({ type: 'sync', targetId: targetId.value })
 })
+
+function scrollDown() {
+  nextTick(() => { if (msgEl.value) msgEl.value.scrollTop = msgEl.value.scrollHeight })
+}
 
 onUnmounted(() => {
   if (channel) { channel.close(); channel = null }
@@ -64,23 +133,13 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.chat-popup {
-  height: 100vh; display: flex; flex-direction: column; background: #f5f5f5;
-}
-.popup-header {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 16px; background: white; border-bottom: 1px solid #e0e0e0;
-}
+.chat-popup { height: 100vh; display: flex; flex-direction: column; background: #f5f5f5; }
+.popup-header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: white; border-bottom: 1px solid #e0e0e0; }
 .popup-header h2 { margin: 0; font-size: 1rem; }
 .popup-status { font-size: 0.75rem; color: #27ae60; font-weight: 600; }
 .popup-status.stopped { color: #999; }
-.popup-messages {
-  flex: 1; overflow-y: auto; padding: 1rem;
-}
-.message {
-  margin-bottom: 1rem; padding: 0.75rem; border-radius: 8px; background: white;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-}
+.popup-messages { flex: 1; overflow-y: auto; padding: 1rem; }
+.message { margin-bottom: 1rem; padding: 0.75rem; border-radius: 8px; background: white; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
 .message.system { background: #e3f2fd; text-align: center; font-style: italic; color: #666; }
 .message.user { background: #e8f4fd; border-left: 3px solid #3498db; }
 .message-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
@@ -88,4 +147,6 @@ onUnmounted(() => {
 .expert-name { font-weight: 600; color: #333; font-size: 0.9rem; }
 .timestamp { margin-left: auto; font-size: 0.75rem; color: #999; }
 .message-content { line-height: 1.6; font-size: 0.9rem; }
+.streaming-cursor { display: inline; animation: blink 0.8s infinite; color: #3498db; font-weight: bold; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
 </style>

@@ -342,8 +342,7 @@
     <!-- ── 画布节点右键菜单 ── -->
     <div v-if="nodeCtx.show" class="context-menu" :style="{ top: nodeCtx.y + 'px', left: nodeCtx.x + 'px' }" @click.stop>
       <div class="menu-items">
-        <div @click="openChatNewWindow">新窗口打开群聊</div>
-        <div @click="openChatInline">在当前页打开群聊</div>
+        <div @click="openChatNewWindow">打开聊天窗口</div>
       </div>
     </div>
 
@@ -408,7 +407,7 @@ import axios from 'axios'
 import ExpertNode from './ExpertNode.vue'
 import GroupNode from './GroupNode.vue'
 
-const emit = defineEmits(['run', 'openChat'])
+const emit = defineEmits(['run'])
 const props = defineProps({
   projectId: { type: String, default: '' },
   isRunning: { type: Boolean, default: false }
@@ -823,6 +822,11 @@ function getExpertIcon(node) {
   return icons[node.data.label] || '📄'
 }
 
+function getExpertLabel(id) {
+  const labels = { senior_author_v1: '资深作者', reader_representative_v1: '读者代表', plot_architect_v1: '剧情架构师', character_designer_v1: '人物设计师', web_editor_v1: '网络编辑', chapter_splitter_v1: '章节拆分师', discussion_summarizer_v1: '讨论总结师' }
+  return labels[id] || id
+}
+
 // ── 容器配置 ──
 
 function onContainerChange() {
@@ -1041,11 +1045,20 @@ function onPaneClick() {
 }
 
 function onNodeDoubleClick({ node }) {
+  openNodeChatTab(node)
+}
+
+function openNodeChatTab(node) {
+  let params = ''
   if (node.type === 'container') {
-    emit('openChat', { containerId: node.id, newWindow: true })
+    params = `containerId=${encodeURIComponent(node.id)}&name=${encodeURIComponent(node.data.name || '容器')}`
   } else if (node.type === 'expert') {
-    emit('openChat', { containerId: node.parentNode || null, expertId: node.data.expertId, newWindow: true })
+    const eid = node.data.expertId
+    const label = getExpertLabel(eid) || eid
+    params = `expertId=${encodeURIComponent(eid)}&name=${encodeURIComponent(label)}`
+    if (node.parentNode) params += `&containerId=${encodeURIComponent(node.parentNode)}`
   }
+  window.open(`/chat-popup?${params}`, `chat_${node.id}`, 'width=600,height=800')
 }
 
 function onNodeContextMenu({ event, node }) {
@@ -1061,23 +1074,23 @@ function onNodeContextMenu({ event, node }) {
 function openChatNewWindow() {
   const n = nodeCtx
   if (n.type === 'container') {
-    emit('openChat', { containerId: n.nodeId, newWindow: true })
-  } else if (n.type === 'expert') {
+    const c = nodes.value.find(x => x.id === n.nodeId)
+    const name = c?.data?.name || '容器'
+    window.open(`/chat-popup?containerId=${encodeURIComponent(n.nodeId)}&name=${encodeURIComponent(name)}`, `chat_${n.nodeId}`, 'width=600,height=800')
+  } else {
+    const eid = n.nodeData?.expertId
+    const label = getExpertLabel(eid) || eid
+    let params = `expertId=${encodeURIComponent(eid)}&name=${encodeURIComponent(label)}`
     const expertNode = nodes.value.find(x => x.id === n.nodeId)
-    emit('openChat', { containerId: expertNode?.parentNode || null, expertId: n.nodeData?.expertId, newWindow: true })
+    if (expertNode?.parentNode) params += `&containerId=${encodeURIComponent(expertNode.parentNode)}`
+    window.open(`/chat-popup?${params}`, `chat_${n.nodeId}`, 'width=600,height=800')
   }
   nodeCtx.show = false
 }
 
 function openChatInline() {
-  const n = nodeCtx
-  if (n.type === 'container') {
-    emit('openChat', { containerId: n.nodeId, newWindow: false })
-  } else if (n.type === 'expert') {
-    const expertNode = nodes.value.find(x => x.id === n.nodeId)
-    emit('openChat', { containerId: expertNode?.parentNode || null, expertId: n.nodeData?.expertId, newWindow: false })
-  }
-  nodeCtx.show = false
+  // 统一为新窗口打开
+  openChatNewWindow()
 }
 
 function hideNodeCtx() { nodeCtx.show = false }
