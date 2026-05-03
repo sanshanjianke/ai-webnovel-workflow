@@ -20,8 +20,7 @@
           <summary>💭 思考过程 <span v-if="msg.streaming" class="thinking-indicator">...</span></summary>
           <pre class="thinking-text">{{ msg.thinking }}</pre>
         </details>
-        <pre v-if="msg.streaming" class="streaming-text">{{ msg.content }}</pre>
-        <div v-else class="message-content" v-html="renderMarkdown(msg.content)"></div>
+        <div class="message-content" v-html="renderMarkdown(msg.content)"></div>
         <span v-if="msg.streaming" class="streaming-cursor">▊</span>
       </div>
     </div>
