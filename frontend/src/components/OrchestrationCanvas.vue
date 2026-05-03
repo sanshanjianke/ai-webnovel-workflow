@@ -273,7 +273,8 @@
       <!-- ── 右侧面板：输入源队列 ── -->
       <div class="config-panel" v-if="selectedNode && selectedNode.type === 'inputSource'"
         @dragover.prevent="onQueueDragOver"
-        @drop.stop="onQueueDrop"
+        @dragleave="onQueueDragLeave"
+        @drop.prevent="onQueueDrop"
         :class="{ 'drag-over': queueDragOver }">
         <div class="panel-header-row">
           <h4>📥 输入源队列</h4>
@@ -1060,17 +1061,22 @@ function onQueueDragOver(event) {
   queueDragOver.value = true
 }
 
+function onQueueDragLeave(event) {
+  if (!event.currentTarget.contains(event.relatedTarget)) {
+    queueDragOver.value = false
+  }
+}
+
 async function onQueueDrop(event) {
-  event.preventDefault()
   queueDragOver.value = false
   const raw = event.dataTransfer.getData('application/json')
-  if (!raw) return
+  if (!raw) { console.log('Queue drop: no JSON data'); return }
   let data
-  try { data = JSON.parse(raw) } catch (e) { return }
-  if (!data.uid || !data.name) return
-  if (!selectedNode.value || selectedNode.value.type !== 'inputSource') return
+  try { data = JSON.parse(raw) } catch (e) { console.log('Queue drop: parse error', e); return }
+  if (!data.uid || !data.name) { console.log('Queue drop: missing uid/name', data); return }
+  if (!selectedNode.value || selectedNode.value.type !== 'inputSource') { console.log('Queue drop: no input source selected'); return }
   if (!selectedNode.value.data.files) selectedNode.value.data.files = []
-  if (selectedNode.value.data.files.some(f => f.uid === data.uid)) return
+  if (selectedNode.value.data.files.some(f => f.uid === data.uid)) { console.log('Queue drop: duplicate', data.uid); return }
   try {
     const res = await axios.get(`/api/projects/${props.projectId}/library/${data.uid}`)
     const content = res.data.content
