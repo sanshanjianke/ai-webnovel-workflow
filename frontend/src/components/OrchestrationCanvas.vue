@@ -13,7 +13,6 @@
     <div class="canvas-layout">
       <!-- ── 左侧工具箱 ── -->
       <div class="toolbox">
-        <!-- 默认专家 -->
         <div class="toolbox-section" :class="{ collapsed: !builtinOpen }" @click="builtinOpen = !builtinOpen">
           <span class="section-arrow">{{ builtinOpen ? '▾' : '▸' }}</span>
           <h4>默认专家</h4>
@@ -32,7 +31,6 @@
           </div>
         </div>
 
-        <!-- 自定义专家 -->
         <div class="toolbox-section" :class="{ collapsed: !customOpen }" @click="customOpen = !customOpen">
           <span class="section-arrow">{{ customOpen ? '▾' : '▸' }}</span>
           <h4>自定义专家</h4>
@@ -72,7 +70,7 @@
           :default-viewport="{ x: 0, y: 0, zoom: 1 }"
           fit-view-on-init
           @node-click="onNodeClick"
-          @pane-click="selectedNode = null"
+          @pane-click="onPaneClick"
           @edge-click="onEdgeClick"
           @connect="onConnect"
           class="flow-canvas"
@@ -83,8 +81,7 @@
         <div class="floating-toolbar">
           <span class="toolbar-label">工具</span>
           <span class="toolbar-sep"></span>
-          <button class="toolbar-btn" @click="addGroupNode('container')" title="容器框">📦</button>
-          <button class="toolbar-btn" @click="addGroupNode('loop')" title="循环结构">🔁</button>
+          <button class="toolbar-btn" @click="addContainer" title="容器（框选专家，可配群聊/循环）">📦</button>
           <button class="toolbar-btn" @click="addPlaceholder('worldbook')" title="世界书节点">📖</button>
           <button class="toolbar-btn" @click="addPlaceholder('rag')" title="RAG节点">🔍</button>
           <button class="toolbar-btn" @click="addPlaceholder('splitter')" title="章节拆分师">✂️</button>
@@ -95,8 +92,55 @@
         </div>
       </div>
 
-      <!-- ── 右侧配置面板 ── -->
-      <div class="config-panel" v-if="selectedNode">
+      <!-- ── 右侧面板：容器配置 ── -->
+      <div class="config-panel" v-if="selectedNode && selectedNode.type === 'container'">
+        <div class="panel-header-row">
+          <h4>容器配置</h4>
+          <button class="btn-back" @click="selectedNode = null">← 返回</button>
+        </div>
+        <div class="config-field">
+          <label>名称</label>
+          <input v-model="containerCfg.name" @change="onContainerChange" />
+        </div>
+        <div class="config-field">
+          <label>发言模式</label>
+          <select v-model="containerCfg.chat_mode" @change="onContainerChange">
+            <option value="sequential">顺序会议</option>
+            <option value="group">群聊</option>
+          </select>
+        </div>
+        <div class="config-field">
+          <label>并发方式</label>
+          <select v-model="containerCfg.concurrency" @change="onContainerChange">
+            <option value="serial">串行（一次一个）</option>
+            <option value="parallel">并行（可同时）</option>
+          </select>
+        </div>
+        <div class="config-field">
+          <label>总结师</label>
+          <select v-model="containerCfg.summarizer" @change="onContainerChange">
+            <option value="off">关闭</option>
+            <option value="every_round">每轮总结</option>
+            <option value="every_3">每 3 次发言</option>
+          </select>
+        </div>
+        <div class="config-field">
+          <label>重复次数（1=不循环）</label>
+          <input v-model.number="containerCfg.repeat" type="number" min="1" max="100" @change="onContainerChange" />
+        </div>
+        <div class="config-field">
+          <label class="checkbox-label">
+            <input type="checkbox" v-model="containerCfg.mention_isolation" @change="onContainerChange" />
+            @提及隔离（仅框内生效）
+          </label>
+        </div>
+        <div class="config-actions">
+          <button class="btn btn-danger btn-sm" @click="removeNode">删除容器</button>
+        </div>
+      </div>
+
+      <!-- ── 右侧面板：专家节点配置 ── -->
+      <div class="config-panel" v-else-if="selectedNode && selectedNode.type === 'expert'">
         <div class="panel-header-row">
           <h4>节点配置</h4>
           <button class="btn-back" @click="selectedNode = null" title="返回会议配置">← 返回</button>
@@ -143,6 +187,8 @@
           <button class="btn btn-danger btn-sm" @click="removeNode">删除节点</button>
         </div>
       </div>
+
+      <!-- ── 右侧面板：会议总配置 ── -->
       <div class="config-panel" v-else>
         <h4>当前配置</h4>
         <div class="meeting-settings">
@@ -176,18 +222,19 @@
           <div v-if="orderedNodes.length === 0" class="hint">
             从左侧拖拽专家到画布，连线定义顺序
           </div>
-          <div v-for="(node, idx) in orderedNodes" :key="node.id" class="order-item">
+          <div v-for="(node, idx) in orderedNodes" :key="node.id + '-' + idx" class="order-item">
             <span class="order-num">{{ idx + 1 }}</span>
             <span class="order-icon">{{ getExpertIcon(node) }}</span>
             <span class="order-label">{{ node.data.label }}</span>
             <span class="order-role">({{ node.data.role }})</span>
+            <span v-if="node.containerName" class="order-container">「{{ node.containerName }}」</span>
           </div>
         </div>
         <button class="btn btn-primary btn-run" @click="runMeeting" :disabled="orderedNodes.length === 0">
           运行会议
         </button>
         <button class="btn btn-outline btn-save" style="width:100%; margin-top:6px;" @click="saveDesign" :disabled="!projectId || saveStatus === 'saving'">
-          {{ saveStatus === 'saving' ? '保存中...' : saveStatus === 'saved' ? '已保存 ✓' : saveStatus === 'error' ? '保存失败 ✗' : '保存到文档库' }}
+          {{ saveStatus === 'saving' ? '保存中...' : saveStatus === 'saved' ? '已保存 ✓' : saveStatus === 'error' ? '保存失败 ✗' : '清空' }}
         </button>
         <button class="btn btn-outline btn-clear" @click="clearCanvas">清空画布</button>
       </div>
@@ -242,14 +289,13 @@ import axios from 'axios'
 
 import ExpertNode from './ExpertNode.vue'
 import GroupNode from './GroupNode.vue'
-import LoopNode from './LoopNode.vue'
 
 const emit = defineEmits(['run'])
 const props = defineProps({
   projectId: { type: String, default: '' }
 })
 
-const nodeTypes = { expert: markRaw(ExpertNode), container: markRaw(GroupNode), loop: markRaw(LoopNode) }
+const nodeTypes = { expert: markRaw(ExpertNode), container: markRaw(GroupNode) }
 
 const nodes = ref([])
 const edges = ref([])
@@ -264,7 +310,7 @@ const collaborationMode = ref('semi_auto')
 const maxSpeeches = ref(0)
 const customPrompt = ref('')
 const showCreateModal = ref(false)
-const saveStatus = ref('')  // '', 'saving', 'saved', 'error'
+const saveStatus = ref('')
 const loadStatus = ref('')
 const draggingOverCanvas = ref(false)
 
@@ -276,6 +322,11 @@ const newExpert = reactive({
   icon: '📄',
   description: '',
   prompt_template: ''
+})
+
+const containerCfg = reactive({
+  name: '容器', chat_mode: 'sequential', concurrency: 'serial',
+  summarizer: 'off', repeat: 1, mention_isolation: true
 })
 
 let nodeCounter = 0
@@ -298,16 +349,11 @@ const presets = [
 
 const presetConfigs = {
   quick_review: {
-    meeting_name: '快速审核',
-    granularity: 'chapter',
-    collaboration_mode: 'full_auto',
-    max_speeches: 3,
-    experts: [{ expert_id: 'web_editor_v1', role: 'main' }]
+    meeting_name: '快速审核', granularity: 'chapter', collaboration_mode: 'full_auto',
+    max_speeches: 3, experts: [{ expert_id: 'web_editor_v1', role: 'main' }]
   },
   volume_planning: {
-    meeting_name: '卷纲编排',
-    granularity: 'volume',
-    collaboration_mode: 'semi_auto',
+    meeting_name: '卷纲编排', granularity: 'volume', collaboration_mode: 'semi_auto',
     max_speeches: 9,
     experts: [
       { expert_id: 'senior_author_v1', role: 'main' },
@@ -316,9 +362,7 @@ const presetConfigs = {
     ]
   },
   chapter_design: {
-    meeting_name: '章纲设计',
-    granularity: 'chapter',
-    collaboration_mode: 'semi_auto',
+    meeting_name: '章纲设计', granularity: 'chapter', collaboration_mode: 'semi_auto',
     max_speeches: 9,
     experts: [
       { expert_id: 'plot_architect_v1', role: 'main' },
@@ -332,27 +376,21 @@ function getAllExperts() {
   return { ...availableExperts, ...customExperts.value }
 }
 
-onMounted(() => {
-  fetchCustomExperts()
-})
+onMounted(() => { fetchCustomExperts() })
 
 async function fetchCustomExperts() {
   try {
     const res = await axios.get('/api/experts')
     customExperts.value = res.data.custom_experts || {}
-  } catch (e) {
-    console.warn('Failed to fetch custom experts:', e)
-  }
+  } catch (e) { console.warn('Failed to fetch custom experts:', e) }
 }
 
 async function saveDesign() {
   saveStatus.value = 'saving'
   try {
     const design = {
-      meeting_name: meetingName.value,
-      granularity: granularity.value,
-      collaboration_mode: collaborationMode.value,
-      max_speeches: maxSpeeches.value,
+      meeting_name: meetingName.value, granularity: granularity.value,
+      collaboration_mode: collaborationMode.value, max_speeches: maxSpeeches.value,
       nodes: nodes.value.map(n => ({
         id: n.id, type: n.type, position: n.position,
         parentNode: n.parentNode || null,
@@ -363,14 +401,12 @@ async function saveDesign() {
         id: e.id, source: e.source, target: e.target, animated: true
       }))
     }
-    const name = `编排设计 — ${meetingName.value || '未命名'}`
+    const now = new Date()
+    const ts = `${String(now.getFullYear()).slice(-2)}_${now.getMonth() + 1}_${now.getDate()}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
+    const name = `${meetingName.value || '未命名'} — ${ts}`
     const res = await axios.post(`/api/projects/${props.projectId}/library`, {
-      name,
-      layer: 'orchestration',
-      content: design,
-      source: 'generate',
-      directory: '/',
-      tags: ['编排', meetingName.value]
+      name, layer: 'orchestration', content: design, source: 'generate',
+      directory: '/', tags: ['编排', meetingName.value]
     })
     await axios.put(`/api/projects/${props.projectId}/library/active/orchestration`, { uid: res.data.uid })
     window.postMessage({ type: 'library-refresh' }, '*')
@@ -389,39 +425,25 @@ async function createCustomExpert() {
     await fetchCustomExperts()
     showCreateModal.value = false
     Object.assign(newExpert, { id: '', name: '', icon: '📄', description: '', prompt_template: '' })
-  } catch (e) {
-    alert(e.response?.data?.detail || '创建失败')
-  }
+  } catch (e) { alert(e.response?.data?.detail || '创建失败') }
 }
 
 async function deleteCustomExpert(id) {
   if (!confirm('确定删除此自定义专家？')) return
-  try {
-    await axios.delete(`/api/experts/custom/${id}`)
-    await fetchCustomExperts()
-  } catch (e) {
-    alert('删除失败')
-  }
+  try { await axios.delete(`/api/experts/custom/${id}`); await fetchCustomExperts() }
+  catch (e) { alert('删除失败') }
 }
 
 function loadPreset(key) {
   activePreset.value = key
-  if (key === 'custom') {
-    clearCanvas()
-    return
-  }
+  if (key === 'custom') { clearCanvas(); return }
   const preset = presetConfigs[key]
   if (!preset) return
-
   meetingName.value = preset.meeting_name
   granularity.value = preset.granularity
   collaborationMode.value = preset.collaboration_mode
   maxSpeeches.value = preset.max_speeches || 0
-
-  nodes.value = []
-  edges.value = []
-  nodeCounter = 0
-
+  nodes.value = []; edges.value = []; nodeCounter = 0
   const allExperts = getAllExperts()
   let prevId = null
   for (const exp of preset.experts) {
@@ -429,42 +451,23 @@ function loadPreset(key) {
     if (!expert) continue
     const id = `node_${++nodeCounter}`
     nodes.value.push({
-      id,
-      type: 'expert',
-      position: { x: nodeCounter * 200, y: 200 },
-      data: {
-        label: expert.label,
-        role: exp.role,
-        expertId: exp.expert_id,
-        customPrompt: ''
-      },
+      id, type: 'expert', position: { x: nodeCounter * 200, y: 200 },
+      data: { label: expert.label, role: exp.role, expertId: exp.expert_id, customPrompt: '' },
       style: { zIndex: 5 }
     })
     if (prevId) {
-      edges.value.push({
-        id: `edge_${prevId}_${id}`,
-        source: prevId,
-        target: id,
-        animated: true
-      })
+      edges.value.push({ id: `edge_${prevId}_${id}`, source: prevId, target: id, animated: true })
     }
     prevId = id
   }
 }
 
 function onDragStart(event, expertId, expert) {
-  event.dataTransfer.setData('application/json', JSON.stringify({
-    expertId,
-    label: expert.label,
-    icon: expert.icon
-  }))
+  event.dataTransfer.setData('application/json', JSON.stringify({ expertId, label: expert.label, icon: expert.icon }))
   event.dataTransfer.effectAllowed = 'move'
 }
 
-function onDragOver(event) {
-  event.preventDefault()
-  event.dataTransfer.dropEffect = 'move'
-}
+function onDragOver(event) { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }
 
 function onDrop(event) {
   event.preventDefault()
@@ -472,47 +475,27 @@ function onDrop(event) {
   const raw = event.dataTransfer.getData('application/json')
   if (!raw) return
   const data = JSON.parse(raw)
-
-  // Document drag from sidebar: if it has layer and uid, load design
   if (data.layer && data.uid) {
-    if (data.layer === 'orchestration') {
-      loadDesignByUid(data.uid)
-    }
+    if (data.layer === 'orchestration') loadDesignByUid(data.uid)
     return
   }
-
-  // Expert drag from toolbox
   if (!data.expertId) return
   const canvasEl = event.target.closest('.vue-flow')
   if (!canvasEl) return
   const rect = canvasEl.getBoundingClientRect()
   const x = event.clientX - rect.left
   const y = event.clientY - rect.top
-
   const id = `node_${++nodeCounter}`
   nodes.value.push({
-    id,
-    type: 'expert',
-    position: { x, y },
-    data: {
-      label: data.label,
-      role: 'main',
-      expertId: data.expertId,
-      customPrompt: ''
-    },
+    id, type: 'expert', position: { x, y },
+    data: { label: data.label, role: 'main', expertId: data.expertId, customPrompt: '' },
     style: { zIndex: 5 }
   })
 }
 
-function onDragEnterCanvas(event) {
-  event.preventDefault()
-  draggingOverCanvas.value = true
-}
-
+function onDragEnterCanvas(event) { event.preventDefault(); draggingOverCanvas.value = true }
 function onDragLeaveCanvas(event) {
-  if (!event.currentTarget.contains(event.relatedTarget)) {
-    draggingOverCanvas.value = false
-  }
+  if (!event.currentTarget.contains(event.relatedTarget)) draggingOverCanvas.value = false
 }
 
 async function loadDesignByUid(uid) {
@@ -520,52 +503,33 @@ async function loadDesignByUid(uid) {
   try {
     const res = await axios.get(`/api/projects/${props.projectId}/library/${uid}`)
     const { content } = res.data
-    if (!content || !content.nodes) {
-      loadStatus.value = 'empty'
-      setTimeout(() => { loadStatus.value = '' }, 2000)
-      return
-    }
-    loadStatus.value = 'loaded'
-    setTimeout(() => { loadStatus.value = '' }, 2000)
-
+    if (!content || !content.nodes) { loadStatus.value = 'empty'; setTimeout(() => { loadStatus.value = '' }, 2000); return }
+    loadStatus.value = 'loaded'; setTimeout(() => { loadStatus.value = '' }, 2000)
     meetingName.value = content.meeting_name || '专家会议'
     granularity.value = content.granularity || 'chapter'
     collaborationMode.value = content.collaboration_mode || 'semi_auto'
     maxSpeeches.value = content.max_speeches || 0
-
     nodes.value = content.nodes.map(n => ({
-      id: n.id,
-      type: n.type || 'expert',
-      position: n.position,
+      id: n.id, type: n.type || 'expert', position: n.position,
       parentNode: n.parentNode || null,
       style: n.style || (n.type === 'expert' ? { zIndex: 5 } : { zIndex: 0 }),
       data: { ...n.data }
     }))
-    edges.value = content.edges.map(e => ({
-      id: e.id, source: e.source, target: e.target, animated: true
-    }))
+    edges.value = content.edges.map(e => ({ id: e.id, source: e.source, target: e.target, animated: true }))
     nodeCounter = nodes.value.length
     activePreset.value = 'custom'
     selectedNode.value = null
   } catch (e) {
-    loadStatus.value = 'error'
-    console.warn('Load design failed:', e)
+    loadStatus.value = 'error'; console.warn('Load design failed:', e)
     setTimeout(() => { loadStatus.value = '' }, 3000)
   }
 }
 
 function onConnect(connection) {
-  edges.value.push({
-    id: `edge_${connection.source}_${connection.target}`,
-    source: connection.source,
-    target: connection.target,
-    animated: true
-  })
+  edges.value.push({ id: `edge_${connection.source}_${connection.target}`, source: connection.source, target: connection.target, animated: true })
 }
 
-function onEdgeClick({ edge }) {
-  edges.value = edges.value.filter(e => e.id !== edge.id)
-}
+function onEdgeClick({ edge }) { edges.value = edges.value.filter(e => e.id !== edge.id) }
 
 function removeNode() {
   if (!selectedNode.value) return
@@ -576,9 +540,7 @@ function removeNode() {
 }
 
 function onConfigChange() {
-  if (selectedNode.value) {
-    selectedNode.value.data.customPrompt = customPrompt.value
-  }
+  if (selectedNode.value) selectedNode.value.data.customPrompt = customPrompt.value
 }
 
 const nodeTriggers = computed(() => {
@@ -588,7 +550,7 @@ const nodeTriggers = computed(() => {
 })
 
 function setTrigger(field, value) {
-  if (selectedNode.value) {
+  if (selectedNode.value && selectedNode.value.type === 'expert') {
     if (!selectedNode.value.data.triggers) selectedNode.value.data.triggers = {}
     selectedNode.value.data.triggers[field] = value
   }
@@ -600,18 +562,36 @@ function getExpertIcon(node) {
   return icons[node.data.label] || '📄'
 }
 
+// ── 容器配置 ──
+
+function onContainerChange() {
+  if (selectedNode.value && selectedNode.value.type === 'container') {
+    Object.assign(selectedNode.value.data, { ...containerCfg })
+    selectedNode.value.data.label = containerCfg.name
+    updateContainerChildren()
+  }
+}
+
+function loadContainerConfig(node) {
+  containerCfg.name = node.data.name || node.data.label || '容器'
+  containerCfg.chat_mode = node.data.chat_mode || 'sequential'
+  containerCfg.concurrency = node.data.concurrency || 'serial'
+  containerCfg.summarizer = node.data.summarizer || 'off'
+  containerCfg.repeat = node.data.repeat || 1
+  containerCfg.mention_isolation = node.data.mention_isolation !== false
+}
+
+// ── 发言顺序计算 ──
+
 const orderedNodes = computed(() => {
   const expertNodes = nodes.value.filter(n => n.type === 'expert')
-  if (edges.value.length === 0) return expertNodes
+  if (edges.value.length === 0) return expertNodes.map(n => {
+    const container = nodes.value.find(c => c.type === 'container' && c.id === n.parentNode)
+    return { ...n, containerName: container ? container.data.name : null }
+  })
 
-  const inDegree = {}
-  const outEdges = {}
-  const nodeMap = {}
-  for (const n of expertNodes) {
-    nodeMap[n.id] = n
-    inDegree[n.id] = 0
-    outEdges[n.id] = []
-  }
+  const inDegree = {}, outEdges = {}, nodeMap = {}
+  for (const n of expertNodes) { nodeMap[n.id] = n; inDegree[n.id] = 0; outEdges[n.id] = [] }
   for (const e of edges.value) {
     if (!nodeMap[e.source] || !nodeMap[e.target]) continue
     inDegree[e.target] = (inDegree[e.target] || 0) + 1
@@ -622,18 +602,21 @@ const orderedNodes = computed(() => {
   const result = []
   while (queue.length > 0) {
     const current = queue.shift()
-    // Check if inside a loop: repeat N times
-    const loopParent = nodes.value.find(n => n.id === current.parentNode && n.type === 'loop')
-    const repeat = loopParent ? (loopParent.data.count || 3) : 1
+    const container = nodes.value.find(n => n.id === current.parentNode && n.type === 'container')
+    const repeat = container ? (container.data.repeat || 1) : 1
+    const containerName = container ? container.data.name : null
     for (let i = 0; i < repeat; i++) {
-      result.push({ ...current, loopIteration: repeat > 1 ? i + 1 : 0 })
+      result.push({ ...current, containerName, loopIteration: repeat > 1 ? i + 1 : 0 })
     }
     for (const target of (outEdges[current.id] || [])) {
       inDegree[target]--
       if (inDegree[target] === 0) queue.push(nodeMap[target])
     }
   }
-  return result.length >= expertNodes.length ? result : expertNodes
+  return result.length >= expertNodes.length ? result : expertNodes.map(n => {
+    const container = nodes.value.find(c => c.type === 'container' && c.id === n.parentNode)
+    return { ...n, containerName: container ? container.data.name : null }
+  })
 })
 
 function runMeeting() {
@@ -641,46 +624,47 @@ function runMeeting() {
     expert_id: node.data.expertId,
     role: node.data.role || 'main',
     custom_prompt: node.data.customPrompt || null,
-    parent_container: node.parentNode || null,
+    container_id: node.parentNode || null,
     loop_iteration: node.loopIteration || 0
   }))
 
-  // Collect loop configs
-  const loops = {}
-  for (const n of nodes.value) {
-    if (n.type === 'loop') {
-      loops[n.id] = { count: n.data.count || 3 }
-    }
-  }
-  const containers = {}
-  for (const n of nodes.value) {
-    if (n.type === 'container') {
-      containers[n.id] = { label: n.data.label || '容器', hint: n.data.hint || '' }
-    }
-  }
+  const containers = nodes.value
+    .filter(n => n.type === 'container')
+    .map(n => ({
+      container_id: n.id,
+      name: n.data.name || n.data.label || '容器',
+      chat_mode: n.data.chat_mode || 'sequential',
+      concurrency: n.data.concurrency || 'serial',
+      summarizer: n.data.summarizer || 'off',
+      repeat: n.data.repeat || 1,
+      mention_isolation: n.data.mention_isolation !== false,
+      children: n.data.children || [],
+      edges: edges.value
+        .filter(e => {
+          const srcIn = (n.data.children || []).includes(e.source)
+          const tgtIn = (n.data.children || []).includes(e.target)
+          return srcIn || tgtIn || e.source === n.id || e.target === n.id
+        })
+        .map(e => ({ source: e.source, target: e.target }))
+    }))
 
   emit('run', {
     meeting_name: meetingName.value,
     granularity: granularity.value,
     experts,
+    containers,
     collaboration_mode: collaborationMode.value,
     max_rounds: 3,
-    max_speeches: maxSpeeches.value,
-    loops,
-    containers
+    max_speeches: maxSpeeches.value
   })
 }
 
 function clearCanvas() {
-  nodes.value = []
-  edges.value = []
-  selectedNode.value = null
-  nodeCounter = 0
-  activePreset.value = 'custom'
+  nodes.value = []; edges.value = []; selectedNode.value = null
+  nodeCounter = 0; activePreset.value = 'custom'
 }
 
-// 容器子节点标签（不污染 node.data 导致递归更新）
-const containerChildren = ref({})
+// ── 容器子节点同步 ──
 
 function updateContainerChildren() {
   const map = {}
@@ -691,8 +675,9 @@ function updateContainerChildren() {
     }
   }
   for (const n of nodes.value) {
-    if (n.type === 'container' || n.type === 'loop') {
-      n.data.children = map[n.id] || []
+    if (n.type === 'container') {
+      const labels = map[n.id] || []
+      n.data.children = [...new Set(labels)]
     }
   }
 }
@@ -700,46 +685,32 @@ function updateContainerChildren() {
 watch(() => nodes.value.length, () => { updateContainerChildren() })
 watch(() => nodes.value.map(n => n.parentNode).join(','), () => { updateContainerChildren() }, { immediate: true })
 
+// ── 占位节点 ──
+
 function addPlaceholder(type) {
   const configs = {
     worldbook: { label: '世界书', icon: '📖', expertId: '__worldbook__', desc: '设定查询/更新' },
     rag: { label: 'RAG检索', icon: '🔍', expertId: '__rag__', desc: '历史/技法检索' },
     splitter: { label: '章节拆分师', icon: '✂️', expertId: 'chapter_splitter_v1', desc: '卷纲→章节' }
   }
-  const cfg = configs[type]
-  if (!cfg) return
-  
+  const cfg = configs[type]; if (!cfg) return
   const id = `node_${++nodeCounter}`
   nodes.value.push({
-    id,
-    type: 'expert',
-    position: { x: 100 + nodeCounter * 80, y: 300 + nodeCounter * 30 },
-    data: {
-      label: cfg.label,
-      role: 'main',
-      expertId: cfg.expertId,
-      customPrompt: '',
-      isPlaceholder: type !== 'splitter',
-      triggers: {}
-    },
+    id, type: 'expert', position: { x: 100 + nodeCounter * 80, y: 300 + nodeCounter * 30 },
+    data: { label: cfg.label, role: 'main', expertId: cfg.expertId, customPrompt: '', isPlaceholder: type !== 'splitter', triggers: {} },
     style: { zIndex: 5 }
   })
 }
 
-function addGroupNode(type) {
-  const id = `group_${++nodeCounter}`
-  const isLoop = type === 'loop'
+function addContainer() {
+  const id = `container_${++nodeCounter}`
   nodes.value.push({
-    id,
-    type: type,
-    position: { x: 250, y: 180 },
+    id, type: 'container', position: { x: 250, y: 180 },
     data: {
-      label: isLoop ? `循环 ${3} 次` : '容器',
-      icon: isLoop ? '🔁' : '📦',
-      count: isLoop ? 3 : undefined,
-      hint: isLoop ? '框内专家重复发言' : '框内专家共享上下文',
-      width: 520,
-      height: 280
+      name: '容器', label: '容器', icon: '📦',
+      chat_mode: 'sequential', concurrency: 'serial', summarizer: 'off',
+      repeat: 1, mention_isolation: true,
+      children: [], width: 520, height: 280
     },
     style: { zIndex: 0 }
   })
@@ -747,21 +718,15 @@ function addGroupNode(type) {
 
 function onNodeClick({ node }) {
   selectedNode.value = node
-  customPrompt.value = node.data.customPrompt || ''
-  if (node.type === 'loop') {
-    promptForLoopCount(node)
+  if (node.type === 'expert') {
+    customPrompt.value = node.data.customPrompt || ''
+  } else if (node.type === 'container') {
+    loadContainerConfig(node)
   }
 }
 
-function promptForLoopCount(node) {
-  const current = node.data.count || 3
-  setTimeout(() => {
-    const input = prompt('循环次数：', current)
-    if (input !== null && !isNaN(parseInt(input)) && parseInt(input) > 0) {
-      node.data.count = parseInt(input)
-      node.data.label = `循环 ${node.data.count} 次`
-    }
-  }, 100)
+function onPaneClick() {
+  selectedNode.value = null
 }
 </script>
 
@@ -774,254 +739,82 @@ function promptForLoopCount(node) {
 }
 
 .preset-bar {
-  display: flex;
-  gap: 8px;
-  padding: 10px 16px;
-  background: white;
-  border-bottom: 1px solid #e0e0e0;
+  display: flex; gap: 8px; padding: 10px 16px;
+  background: white; border-bottom: 1px solid #e0e0e0;
 }
 .preset-btn {
-  padding: 6px 16px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  background: white;
-  cursor: pointer;
-  font-size: 0.875rem;
-  transition: all 0.2s;
+  padding: 6px 16px; border: 1px solid #ddd; border-radius: 6px;
+  background: white; cursor: pointer; font-size: 0.875rem; transition: all 0.2s;
 }
 .preset-btn:hover { background: #f0f7ff; border-color: #3498db; }
 .preset-btn.active { background: #3498db; color: white; border-color: #3498db; }
 
-/* ── 浮动工具栏（悬浮于画布上） ── */
 .floating-toolbar {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 6px 12px;
-  background: #fff;
-  border: 1px solid #d0d0d0;
-  border-radius: 10px;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.12);
-  z-index: 10;
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 2px; padding: 6px 12px;
+  background: #fff; border: 1px solid #d0d0d0; border-radius: 10px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.12); z-index: 10;
 }
-.toolbar-label {
-  font-size: 0.7rem;
-  color: #999;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-}
+.toolbar-label { font-size: 0.7rem; color: #999; font-weight: 600; letter-spacing: 0.05em; }
 .floating-toolbar .toolbar-sep { width: 1px; height: 20px; background: #ddd; margin: 0 4px; }
-
 .toolbar-btn {
-  width: 32px;
-  height: 32px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  cursor: pointer;
-  font-size: 1.1rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s;
+  width: 32px; height: 32px; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; cursor: pointer; font-size: 1.1rem;
+  display: flex; align-items: center; justify-content: center; transition: all 0.15s;
 }
 .toolbar-btn:hover { background: #f0f7ff; border-color: #3498db; }
 .toolbar-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.canvas-layout {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-}
+.canvas-layout { flex: 1; display: flex; overflow: hidden; }
 
-/* ── 工具箱 ── */
-.toolbox {
-  width: 190px;
-  background: white;
-  border-right: 1px solid #e0e0e0;
-  padding: 4px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-}
-.toolbox-section {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 8px 6px 8px;
-  cursor: pointer;
-  user-select: none;
-  border-radius: 4px;
-}
+.toolbox { width: 190px; background: white; border-right: 1px solid #e0e0e0; padding: 4px; overflow-y: auto; display: flex; flex-direction: column; }
+.toolbox-section { display: flex; align-items: center; gap: 4px; padding: 8px 8px 6px 8px; cursor: pointer; user-select: none; border-radius: 4px; }
 .toolbox-section:hover { background: #f5f5f5; }
 .toolbox-section.collapsed { margin-bottom: 2px; }
-.toolbox-section h4 {
-  font-size: 0.75rem;
-  color: #999;
-  margin: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.section-arrow {
-  font-size: 0.7rem;
-  color: #bbb;
-  width: 12px;
-}
-.toolbox-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px;
-  border-radius: 8px;
-  cursor: grab;
-  transition: background 0.2s;
-  margin-bottom: 4px;
-  border: 1px solid transparent;
-}
+.toolbox-section h4 { font-size: 0.75rem; color: #999; margin: 0; text-transform: uppercase; letter-spacing: 0.05em; }
+.section-arrow { font-size: 0.7rem; color: #bbb; width: 12px; }
+.toolbox-item { display: flex; align-items: center; gap: 8px; padding: 10px; border-radius: 8px; cursor: grab; transition: background 0.2s; margin-bottom: 4px; border: 1px solid transparent; }
 .toolbox-item:hover { background: #f0f7ff; border-color: #d0e3f7; }
 .toolbox-item:active { cursor: grabbing; }
 .custom-item { position: relative; }
-.btn-delete-expert {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 18px;
-  height: 18px;
-  border: none;
-  background: rgba(0,0,0,0.1);
-  border-radius: 50%;
-  cursor: pointer;
-  font-size: 0.7rem;
-  color: #999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
+.btn-delete-expert { position: absolute; top: 4px; right: 4px; width: 18px; height: 18px; border: none; background: rgba(0,0,0,0.1); border-radius: 50%; cursor: pointer; font-size: 0.7rem; color: #999; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s; }
 .custom-item:hover .btn-delete-expert { opacity: 1; }
 .btn-delete-expert:hover { background: #e74c3c; color: white; }
 .expert-icon { font-size: 1.3rem; }
 .expert-info { flex: 1; }
 .expert-name { font-size: 0.85rem; font-weight: 600; display: block; }
 .expert-desc { font-size: 0.7rem; color: #999; }
-.btn-create-expert {
-  width: calc(100% - 4px);
-  margin: 8px 2px;
-  padding: 8px;
-  border: 1px dashed #ccc;
-  border-radius: 6px;
-  background: transparent;
-  cursor: pointer;
-  font-size: 0.8rem;
-  color: #888;
-  transition: all 0.2s;
-}
+.btn-create-expert { width: calc(100% - 4px); margin: 8px 2px; padding: 8px; border: 1px dashed #ccc; border-radius: 6px; background: transparent; cursor: pointer; font-size: 0.8rem; color: #888; transition: all 0.2s; }
 .btn-create-expert:hover { border-color: #3498db; color: #3498db; background: #f0f7ff; }
 
-/* ── 画布 ── */
 .canvas-area { flex: 1; position: relative; transition: background 0.2s; border-radius: 4px; }
 .canvas-area.drag-over-canvas { background: rgba(52, 152, 219, 0.08); box-shadow: inset 0 0 0 2px #3498db; }
 .flow-canvas { width: 100%; height: 100%; }
 
-/* ── 配置面板 ── */
-.config-panel {
-  width: 260px;
-  background: white;
-  border-left: 1px solid #e0e0e0;
-  padding: 14px;
-  overflow-y: auto;
-}
-.config-panel h4 {
-  font-size: 0.85rem;
-  color: #666;
-  margin: 0;
-  padding-bottom: 6px;
-  border-bottom: 1px solid #eee;
-}
-.panel-header-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
+.config-panel { width: 280px; background: white; border-left: 1px solid #e0e0e0; padding: 14px; overflow-y: auto; }
+.config-panel h4 { font-size: 0.85rem; color: #666; margin: 0; padding-bottom: 6px; border-bottom: 1px solid #eee; }
+.panel-header-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .panel-header-row h4 { border: none; padding: 0; margin: 0; }
-.btn-back {
-  padding: 2px 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  background: white;
-  cursor: pointer;
-  font-size: 0.75rem;
-  color: #3498db;
-  transition: all 0.15s;
-}
+.btn-back { padding: 2px 8px; border: 1px solid #ddd; border-radius: 4px; background: white; cursor: pointer; font-size: 0.75rem; color: #3498db; transition: all 0.15s; }
 .btn-back:hover { background: #f0f7ff; border-color: #3498db; }
 .config-field { margin-bottom: 10px; }
-.config-field label {
-  display: block;
-  font-size: 0.75rem;
-  color: #888;
-  margin-bottom: 4px;
-}
-.config-field input,
-.config-field select,
-.config-field textarea {
-  width: 100%;
-  padding: 6px 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  font-size: 0.85rem;
-}
+.config-field label { display: block; font-size: 0.75rem; color: #888; margin-bottom: 4px; }
+.checkbox-label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.8rem; }
+.checkbox-label input { width: auto; }
+.config-field input, .config-field select, .config-field textarea { width: 100%; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85rem; }
 .config-field textarea { resize: vertical; font-family: inherit; }
 .config-field strong { font-size: 0.85rem; }
-.expert-label-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.placeholder-badge {
-  font-size: 0.65rem;
-  background: #f0f0f0;
-  color: #999;
-  padding: 1px 6px;
-  border-radius: 4px;
-}
-.trigger-icon {
-  font-size: 0.9rem;
-  margin-left: 2px;
-}
+.expert-label-row { display: flex; align-items: center; gap: 6px; }
+.placeholder-badge { font-size: 0.65rem; background: #f0f0f0; color: #999; padding: 1px 6px; border-radius: 4px; }
+.trigger-icon { font-size: 0.9rem; margin-left: 2px; }
 .order-list { margin-top: 8px; }
-.order-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: 4px;
-  background: #f8f9fa;
-  margin-bottom: 4px;
-  font-size: 0.8rem;
-}
-.order-num {
-  background: #3498db;
-  color: white;
-  border-radius: 50%;
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.7rem;
-}
+.order-item { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 4px; background: #f8f9fa; margin-bottom: 4px; font-size: 0.8rem; }
+.order-num { background: #3498db; color: white; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; }
 .order-label { font-weight: 600; }
 .order-role { color: #999; font-size: 0.7rem; }
+.order-container { color: #9b59b6; font-size: 0.65rem; background: #f5f0ff; padding: 1px 6px; border-radius: 4px; }
 .hint { font-size: 0.8rem; color: #999; font-style: italic; padding: 12px 0; }
 
-/* ── 按钮 ── */
 .btn { padding: 0.5rem 1rem; border: 1px solid #ddd; border-radius: 4px; cursor: pointer; font-size: 0.875rem; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-primary { background: #3498db; color: white; border-color: #3498db; }
@@ -1032,37 +825,12 @@ function promptForLoopCount(node) {
 .btn-clear { width: 100%; margin-top: 6px; padding: 8px; font-size: 0.85rem; }
 .config-actions { margin-top: 10px; }
 
-/* ── 模态框 ── */
-.modal-overlay {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 999;
-}
-.modal-content {
-  width: 520px;
-  max-width: 90vw;
-  max-height: 85vh;
-  overflow-y: auto;
-  background: white;
-  padding: 1.5rem;
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-}
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 999; }
+.modal-content { width: 520px; max-width: 90vw; max-height: 85vh; overflow-y: auto; background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
 .modal-content h2 { margin: 0 0 1rem 0; font-size: 1.2rem; }
 .form-group { margin-bottom: 1rem; }
 .form-group label { display: block; font-size: 0.8rem; color: #666; margin-bottom: 4px; font-weight: 500; }
-.form-group input, .form-group textarea {
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 0.9rem;
-  font-family: inherit;
-}
+.form-group input, .form-group textarea { width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9rem; font-family: inherit; }
 .form-group textarea { resize: vertical; min-height: 120px; font-family: 'Courier New', monospace; font-size: 0.85rem; }
 .vars-hint { font-size: 0.7rem; color: #999; margin-bottom: 6px; line-height: 1.5; }
 .vars-hint code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; font-size: 0.7rem; }

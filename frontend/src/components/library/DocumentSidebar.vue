@@ -16,6 +16,7 @@
         <button class="btn-sm" @click="refresh" title="刷新">⟳</button>
         <button class="btn-sm" @click="createDirectory" title="新建目录">📁</button>
         <button class="btn-sm" @click="triggerImport" title="导入文件">📥</button>
+        <button class="btn-sm btn-danger-sm" @click="deleteSelected" title="删除选中文档" :disabled="!activeDocUid">🗑️</button>
         <input 
           ref="fileInput" 
           type="file" 
@@ -61,7 +62,7 @@
                 draggable="true"
                 @click="selectDocument(doc)"
                 @dblclick="openDocument(doc)"
-                @contextmenu.prevent="showDocContext($event, doc)"
+                @contextmenu.prevent.stop="showDocContext($event, doc)"
                 @dragstart="onDragStart($event, doc)"
                 @dragend="onDragEnd($event)"
               >
@@ -82,7 +83,7 @@
             draggable="true"
             @click="selectDocument(item)"
             @dblclick="openDocument(item)"
-            @contextmenu.prevent="showDocContext($event, item)"
+            @contextmenu.prevent.stop="showDocContext($event, item)"
             @dragstart="onDragStart($event, item)"
             @dragend="onDragEnd($event)"
           >
@@ -103,16 +104,16 @@
       class="context-menu"
       :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
     >
-      <div v-if="contextMenu.type === 'doc'" class="menu-items">
+      <div v-if="contextMenu.type === 'doc'" class="menu-items" @click.stop>
         <div @click="openDocument(contextMenu.item)">打开</div>
         <div @click="setAsActive">设为活跃</div>
         <div @click="renameDocument">重命名</div>
         <div @click="toggleArchive">{{ contextMenu.item?.status === 'archived' ? '取消归档' : '归档' }}</div>
         <div class="menu-divider"></div>
         <div @click="exportDocument">导出</div>
-        <div class="menu-danger" @click="deleteDocument">删除</div>
+        <div class="menu-danger" @click.stop="deleteDocument">删除</div>
       </div>
-      <div v-else-if="contextMenu.type === 'dir'" class="menu-items">
+      <div v-else-if="contextMenu.type === 'dir'" class="menu-items" @click.stop>
         <div @click="createDocInDir">新建文档</div>
         <div @click="importToDir">导入文件</div>
         <div @click="createSubDirectory">新建子目录</div>
@@ -562,6 +563,23 @@ const deleteDocument = async () => {
   hideContextMenu()
 }
 
+const deleteSelected = async () => {
+  const uid = activeDocUid.value
+  if (!uid) return
+  const doc = documents.value.find(d => d.uid === uid)
+  if (!doc) return
+  if (!confirm(`确定删除文档 "${doc.name}"？`)) return
+  
+  try {
+    await fetch(`${apiBase.value}/${uid}`, { method: 'DELETE' })
+    activeDocUid.value = null
+    await refresh()
+  } catch (err) {
+    console.error('Delete failed:', err)
+    alert('删除失败')
+  }
+}
+
 const createDirectory = async () => {
   const name = prompt('目录名称:')
   if (name) {
@@ -829,6 +847,19 @@ defineExpose({ refresh })
 
 .btn-sm:hover {
   background: #e0e0e0;
+}
+
+.btn-danger-sm {
+  color: #e74c3c;
+}
+
+.btn-danger-sm:hover {
+  background: #fde8e8;
+}
+
+.btn-danger-sm:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .loading {

@@ -11,7 +11,7 @@ from backend.services.project_manager import get_project_manager
 from backend.services.meeting_logger import MeetingLogger
 from backend.core.config import get_config
 from backend.core.registry import discover_modules, MODULE_REGISTRY
-from backend.core.protocols.meeting import MeetingConfig, ExpertConfig, ExpertRole, Granularity
+from backend.core.protocols.meeting import MeetingConfig, ExpertConfig, ContainerConfig, ExpertRole, Granularity
 from backend.modules.orchestration import MeetingEngine, PRESET_CONFIGS
 
 router = APIRouter()
@@ -40,12 +40,26 @@ class ExpertConfigRequest(BaseModel):
     expert_id: str
     role: Literal["main", "review", "supplement"] = "main"
     custom_prompt: Optional[str] = None
+    container_id: Optional[str] = None
+
+
+class ContainerConfigRequest(BaseModel):
+    container_id: str
+    name: str = "容器"
+    chat_mode: Literal["sequential", "group"] = "sequential"
+    concurrency: Literal["serial", "parallel"] = "serial"
+    summarizer: Literal["off", "every_round", "every_3"] = "off"
+    repeat: int = 1
+    mention_isolation: bool = True
+    children: list[str] = []
+    edges: list[dict] = []
 
 
 class MeetingStartRequest(BaseModel):
     meeting_name: str = "专家会议"
     granularity: Literal["volume", "chapter", "scene"] = "chapter"
     experts: list[ExpertConfigRequest]
+    containers: list[ContainerConfigRequest] = []
     collaboration_mode: Literal["semi_auto", "full_auto", "manual"] = "semi_auto"
     max_rounds: int = 3
     max_speeches: int = 0
@@ -230,14 +244,30 @@ async def meeting_start(project_id: str, request: MeetingStartRequest):
         vision = json.load(f)
 
     expert_configs = [
-        ExpertConfig(expert_id=e.expert_id, role=ExpertRole(e.role), custom_prompt=e.custom_prompt)
+        ExpertConfig(expert_id=e.expert_id, role=ExpertRole(e.role), custom_prompt=e.custom_prompt, container_id=e.container_id)
         for e in request.experts
+    ]
+
+    container_configs = [
+        ContainerConfig(
+            container_id=c.container_id,
+            name=c.name,
+            chat_mode=c.chat_mode,
+            concurrency=c.concurrency,
+            summarizer=c.summarizer,
+            repeat=c.repeat,
+            mention_isolation=c.mention_isolation,
+            children=c.children,
+            edges=c.edges,
+        )
+        for c in request.containers
     ]
 
     meeting_config = MeetingConfig(
         meeting_name=request.meeting_name,
         granularity=Granularity(request.granularity),
         experts=expert_configs,
+        containers=container_configs,
         collaboration_mode=request.collaboration_mode,
         max_rounds=request.max_rounds,
         max_speeches=request.max_speeches

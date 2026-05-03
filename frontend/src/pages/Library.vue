@@ -61,6 +61,7 @@
             <button class="btn btn-primary" @click="openDoc">查看全文</button>
             <button class="btn" @click="setAsActive">设为活跃文档</button>
             <button class="btn" @click="exportDoc">导出</button>
+            <button class="btn btn-danger" @click="deleteDoc">删除</button>
           </div>
         </div>
       </div>
@@ -326,6 +327,21 @@ const exportDoc = async () => {
   }
 }
 
+const deleteDoc = async () => {
+  if (!selectedDoc.value) return
+  if (!confirm(`确定删除文档 "${selectedDoc.value.name}"？`)) return
+  
+  try {
+    await fetch(`${apiBase.value}/${selectedDoc.value.uid}`, { method: 'DELETE' })
+    selectedDoc.value = null
+    docContent.value = null
+    loadLibrary()
+  } catch (err) {
+    console.error('Delete failed:', err)
+    alert('删除失败')
+  }
+}
+
 const createNewDoc = () => {
   newDoc.value = { name: '', layer: 'l1', content: '{}' }
   showCreateDialog.value = true
@@ -564,6 +580,16 @@ onUnmounted(() => {
 
 .btn-primary:hover {
   background: #2980b9;
+}
+
+.btn-danger {
+  background: #e74c3c;
+  border-color: #e74c3c;
+  color: white;
+}
+
+.btn-danger:hover {
+  background: #c0392b;
 }
 
 .create-dialog {

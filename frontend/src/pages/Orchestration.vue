@@ -182,12 +182,16 @@ function handleSSEEvent(type, data) {
       })
       break
 
+    case 'expert_start':
+      break
+
     case 'expert_speak':
       speechCount.value = data.speech_count || speechCount.value
       messages.value.push({
         type: 'expert',
         expert_type: data.expert_type,
         content: data.content,
+        container_id: data.container_id,
         timestamp: new Date().toISOString()
       })
       if (data.mention) {
@@ -197,6 +201,17 @@ function handleSSEEvent(type, data) {
           timestamp: new Date().toISOString()
         })
       }
+      break
+
+    case 'summarizer':
+      messages.value.push({
+        type: 'summarizer',
+        expert_type: '讨论总结师',
+        content: data.content,
+        container_id: data.container_id,
+        container_name: data.container_name,
+        timestamp: new Date().toISOString()
+      })
       break
 
     case 'mention_detected':
@@ -314,7 +329,8 @@ async function scrollToBottom() {
 function getIcon(msg) {
   const icons = {
     '资深作者': '📕', '读者代表': '📙', '剧情架构师': '🏛',
-    '人物设计师': '🎭', '网络编辑': '💼', '系统': '⚙️', '主编': '💬'
+    '人物设计师': '🎭', '网络编辑': '💼', '系统': '⚙️', '主编': '💬',
+    '讨论总结师': '📋'
   }
   return icons[msg.expert_type || msg.type] || '📄'
 }
@@ -395,6 +411,10 @@ function formatTime(ts) {
 .message.user {
   background: #e8f4fd;
   border-left: 3px solid #3498db;
+}
+.message.summarizer {
+  background: #fce4ec;
+  border-left: 3px solid #e91e63;
 }
 .message-header {
   display: flex;

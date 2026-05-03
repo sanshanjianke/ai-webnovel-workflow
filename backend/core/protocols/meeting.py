@@ -30,16 +30,30 @@ class Outline(BaseModel):
     world_notes: list[str] = []
 
 
+class ContainerConfig(BaseModel):
+    container_id: str
+    name: str = "容器"
+    chat_mode: Literal["sequential", "group"] = "sequential"
+    concurrency: Literal["serial", "parallel"] = "serial"
+    summarizer: Literal["off", "every_round", "every_3"] = "off"
+    repeat: int = 1
+    mention_isolation: bool = True
+    children: list[str] = []   # expert node IDs inside this container
+    edges: list[dict] = []     # speak_order edges inside container
+
+
 class ExpertConfig(BaseModel):
     expert_id: str
     role: ExpertRole = ExpertRole.MAIN
     custom_prompt: Optional[str] = None
+    container_id: Optional[str] = None  # which container this expert belongs to
 
 
 class MeetingConfig(BaseModel):
     meeting_name: str = "专家会议"
     granularity: Granularity = Granularity.CHAPTER
     experts: list[ExpertConfig]
+    containers: list[ContainerConfig] = []
     collaboration_mode: Literal["semi_auto", "full_auto", "manual"] = "semi_auto"
     max_rounds: int = 3
     max_speeches: int = 0  # 0 = unlimited, >0 = auto-stop after N speeches
