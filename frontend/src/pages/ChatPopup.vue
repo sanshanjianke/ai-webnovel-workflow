@@ -2,14 +2,26 @@
   <div class="chat-popup">
     <div class="popup-header">
       <h2>{{ title }}</h2>
-      <span class="queue-badge" v-if="queueState.total > 1">📥 {{ queueState.index }}/{{ queueState.total }}</span>
       <span class="popup-status" v-if="isRunning">● 运行中</span>
       <span class="popup-status stopped" v-else>已完成</span>
     </div>
-    <div class="popup-messages" ref="msgEl">
-      <div v-if="messages.length === 0" class="empty-hint">
-        等待消息...<br><small>在编排画布上运行管道后，消息将在此显示</small>
+    <div class="popup-body">
+      <div class="queue-sidebar" v-if="queueState.total > 1">
+        <div class="queue-sidebar-header">📥 队列</div>
+        <div v-for="i in queueState.total" :key="i"
+          :class="['queue-sidebar-item', {
+            done: i < queueState.index,
+            current: i === queueState.index,
+            pending: i > queueState.index
+          }]">
+          <span class="queue-dot"></span>
+          <span>文件 {{ i }}</span>
+        </div>
       </div>
+      <div class="popup-messages" ref="msgEl">
+        <div v-if="messages.length === 0" class="empty-hint">
+          等待消息...<br><small>在编排画布上运行管道后，消息将在此显示</small>
+        </div>
       <div v-for="(msg, idx) in messages" :key="idx"
         :class="['message', msg.type]">
         <div class="message-header">
@@ -24,6 +36,7 @@
         <div class="message-content" v-html="renderMarkdown(msg.content)"></div>
         <span v-if="msg.streaming" class="streaming-cursor">▊</span>
       </div>
+    </div>
     </div>
   </div>
 </template>
@@ -166,10 +179,20 @@ onUnmounted(() => {
 <style scoped>
 .chat-popup { height: calc(100vh - 42px); display: flex; flex-direction: column; background: #f5f5f5; overflow: hidden; }
 .popup-header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: white; border-bottom: 1px solid #e0e0e0; flex-shrink: 0; }
+.popup-body { flex: 1; display: flex; overflow: hidden; }
+.queue-sidebar { width: 140px; flex-shrink: 0; padding: 12px 8px; border-right: 1px solid #e0e0e0; background: #fafafa; overflow-y: auto; }
+.queue-sidebar-header { font-size: 0.8rem; font-weight: 600; color: #666; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #eee; }
+.queue-sidebar-item { display: flex; align-items: center; gap: 6px; padding: 4px 6px; font-size: 0.78rem; border-radius: 4px; margin-bottom: 2px; }
+.queue-sidebar-item.current { background: #e8f4fd; color: #3498db; font-weight: 600; }
+.queue-sidebar-item.done { color: #27ae60; }
+.queue-sidebar-item.pending { color: #bbb; }
+.queue-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.queue-sidebar-item.done .queue-dot { background: #27ae60; }
+.queue-sidebar-item.current .queue-dot { background: #3498db; animation: pulse 1s infinite; }
+.queue-sidebar-item.pending .queue-dot { background: #ddd; }
 .popup-header h2 { margin: 0; font-size: 1rem; }
 .popup-status { font-size: 0.75rem; color: #27ae60; font-weight: 600; }
 .popup-status.stopped { color: #999; }
-.queue-badge { font-size: 0.75rem; background: #3498db; color: white; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
 .popup-messages { flex: 1; overflow-y: auto; padding: 1rem; }
 .message { margin-bottom: 1rem; padding: 0.75rem; border-radius: 8px; background: white; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
 .message.system { background: #e3f2fd; text-align: center; font-style: italic; color: #666; }
