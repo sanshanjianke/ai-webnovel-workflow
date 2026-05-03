@@ -798,6 +798,13 @@ function onDrop(event) {
     if (data.layer === 'orchestration') loadDesignByUid(data.uid)
     return
   }
+  // 从文档库拖入文档 → 添加到输入源队列
+  const docUid = event.dataTransfer.getData('text/plain')
+  const docName = event.dataTransfer.getData('document-name')
+  if (docUid && docName) {
+    addDocumentToInputSource(docUid, docName)
+    return
+  }
   if (!data.expertId) return
   const canvasEl = event.target.closest('.vue-flow')
   if (!canvasEl) return
@@ -1046,6 +1053,28 @@ function inputSourceFiles() {
     return srcNode.data.files.map(f => f.content)
   }
   return []
+}
+
+async function addDocumentToInputSource(uid, name) {
+  // 查找或创建输入源节点
+  let srcNode = nodes.value.find(n => n.type === 'inputSource')
+  if (!srcNode) {
+    const id = `input_${++nodeCounter}`
+    srcNode = { id, type: 'inputSource', position: { x: 80, y: 180 }, data: { label: '输入源', files: [], selected: false }, style: { zIndex: 5 } }
+    nodes.value.push(srcNode)
+  }
+  if (!srcNode.data.files) srcNode.data.files = []
+  // 避免重复
+  if (srcNode.data.files.some(f => f.uid === uid)) return
+  // 获取文档内容
+  try {
+    const res = await axios.get(`/api/projects/${props.projectId}/library/${uid}`)
+    const content = res.data.content
+    const text = typeof content === 'string' ? content : (content.content || JSON.stringify(content, null, 2))
+    srcNode.data.files.push({ name, content: text, uid })
+  } catch (e) {
+    console.error('Failed to load document:', e)
+  }
 }
 
 // ── 容器子节点同步 ──
