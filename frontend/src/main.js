@@ -10,6 +10,7 @@ import L4Render from './pages/L4Render.vue'
 import WorldBook from './pages/WorldBook.vue'
 import Settings from './pages/Settings.vue'
 import Library from './pages/Library.vue'
+import ChatPopup from './pages/ChatPopup.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
@@ -19,7 +20,8 @@ const routes = [
   { path: '/l4', component: L4Render },
   { path: '/worldbook', component: WorldBook },
   { path: '/library', component: Library },
-  { path: '/settings', component: Settings }
+  { path: '/settings', component: Settings },
+  { path: '/chat-popup', component: ChatPopup }
 ]
 
 const router = createRouter({

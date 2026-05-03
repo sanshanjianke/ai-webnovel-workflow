@@ -76,6 +76,8 @@
           :default-viewport="{ x: 0, y: 0, zoom: 1 }"
           fit-view-on-init
           @node-click="onNodeClick"
+          @node-double-click="onNodeDoubleClick"
+          @node-context-menu="onNodeContextMenu"
           @pane-click="onPaneClick"
           @edge-click="onEdgeClick"
           @connect="onConnect"
@@ -276,8 +278,13 @@
             <input v-model="meetingName" placeholder="专家会议" />
           </div>
         </div>
-        <button class="btn btn-primary btn-run" @click="runMeeting" :disabled="orderedNodes.length === 0">
-          运行会议
+        <button 
+          class="btn btn-run" 
+          :class="props.isRunning ? 'btn-running' : 'btn-primary'"
+          @click="runMeeting" 
+          :disabled="orderedNodes.length === 0 || props.isRunning"
+        >
+          {{ props.isRunning ? '● 运行中' : '运行会议' }}
         </button>
         <button class="btn btn-outline btn-save" style="width:100%; margin-top:6px;" @click="saveDesign" :disabled="!projectId || saveStatus === 'saving'">
           {{ saveStatus === 'saving' ? '保存中...' : saveStatus === 'saved' ? '已保存 ✓' : saveStatus === 'error' ? '保存失败 ✗' : '清空' }}
@@ -329,6 +336,14 @@
           <div @click="editExpert">编辑</div>
           <div class="menu-danger" @click="deleteCtxExpert">删除</div>
         </template>
+      </div>
+    </div>
+
+    <!-- ── 画布节点右键菜单 ── -->
+    <div v-if="nodeCtx.show" class="context-menu" :style="{ top: nodeCtx.y + 'px', left: nodeCtx.x + 'px' }" @click.stop>
+      <div class="menu-items">
+        <div @click="openChatNewWindow">新窗口打开群聊</div>
+        <div @click="openChatInline">在当前页打开群聊</div>
       </div>
     </div>
 
@@ -393,9 +408,10 @@ import axios from 'axios'
 import ExpertNode from './ExpertNode.vue'
 import GroupNode from './GroupNode.vue'
 
-const emit = defineEmits(['run'])
+const emit = defineEmits(['run', 'openChat'])
 const props = defineProps({
-  projectId: { type: String, default: '' }
+  projectId: { type: String, default: '' },
+  isRunning: { type: Boolean, default: false }
 })
 
 const nodeTypes = { expert: markRaw(ExpertNode), container: markRaw(GroupNode) }
@@ -426,6 +442,7 @@ const newExpert = reactive({
 })
 
 const expertCtx = reactive({ show: false, x: 0, y: 0, id: '', data: null, isBuiltin: true })
+const nodeCtx = reactive({ show: false, x: 0, y: 0, nodeId: '', type: '' })
 const showViewExpert = ref(false)
 const viewExpertData = reactive({ id: '', name: '', icon: '', desc: '', prompt: '' })
 const showEditExpert = ref(false)
@@ -494,10 +511,12 @@ function getAllExperts() {
 onMounted(() => {
   fetchCustomExperts()
   document.addEventListener('click', hideExpertContext)
+  document.addEventListener('click', hideNodeCtx)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', hideExpertContext)
+  document.removeEventListener('click', hideNodeCtx)
 })
 
 async function fetchCustomExperts() {
@@ -1011,6 +1030,47 @@ function onNodeClick({ node }) {
 function onPaneClick() {
   selectedNode.value = null
 }
+
+function onNodeDoubleClick({ node }) {
+  if (node.type === 'container') {
+    emit('openChat', { containerId: node.id, newWindow: true })
+  } else if (node.type === 'expert') {
+    emit('openChat', { containerId: node.parentNode || null, expertId: node.id, newWindow: true })
+  }
+}
+
+function onNodeContextMenu({ event, node }) {
+  event.preventDefault()
+  nodeCtx.show = true
+  nodeCtx.x = event.clientX
+  nodeCtx.y = event.clientY
+  nodeCtx.nodeId = node.id
+  nodeCtx.type = node.type
+}
+
+function openChatNewWindow() {
+  const n = nodeCtx
+  if (n.type === 'container') {
+    emit('openChat', { containerId: n.nodeId, newWindow: true })
+  } else if (n.type === 'expert') {
+    const expertNode = nodes.value.find(x => x.id === n.nodeId)
+    emit('openChat', { containerId: expertNode?.parentNode || null, newWindow: true })
+  }
+  nodeCtx.show = false
+}
+
+function openChatInline() {
+  const n = nodeCtx
+  if (n.type === 'container') {
+    emit('openChat', { containerId: n.nodeId, newWindow: false })
+  } else if (n.type === 'expert') {
+    const expertNode = nodes.value.find(x => x.id === n.nodeId)
+    emit('openChat', { containerId: expertNode?.parentNode || null, newWindow: false })
+  }
+  nodeCtx.show = false
+}
+
+function hideNodeCtx() { nodeCtx.show = false }
 </script>
 
 <style scoped>
@@ -1105,6 +1165,7 @@ function onPaneClick() {
 .btn-outline { background: white; color: #666; }
 .btn-sm { padding: 4px 10px; font-size: 0.8rem; }
 .btn-run { width: 100%; margin-top: 14px; padding: 10px; font-size: 0.95rem; }
+.btn-running { background: #27ae60; color: white; border-color: #27ae60; cursor: not-allowed; }
 .btn-clear { width: 100%; margin-top: 6px; padding: 8px; font-size: 0.85rem; }
 .config-actions { margin-top: 10px; }
 .config-section { margin: 12px 0 6px 0; }
