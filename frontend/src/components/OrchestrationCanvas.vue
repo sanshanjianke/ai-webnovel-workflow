@@ -1057,7 +1057,7 @@ function inputSourceFiles() {
 }
 
 function onQueueDragOver(event) {
-  event.dataTransfer.dropEffect = 'copy'
+  event.dataTransfer.dropEffect = 'move'
   queueDragOver.value = true
 }
 
