@@ -16,7 +16,8 @@
           <span class="expert-name">{{ msg.expert_type || msg.type }}</span>
           <span class="timestamp">{{ formatTime(msg.timestamp) }}</span>
         </div>
-        <div class="message-content" v-html="renderMarkdown(msg.content)"></div>
+        <pre v-if="msg.streaming" class="streaming-text">{{ msg.content }}</pre>
+        <div v-else class="message-content" v-html="renderMarkdown(msg.content)"></div>
         <span v-if="msg.streaming" class="streaming-cursor">▊</span>
       </div>
     </div>
@@ -126,8 +127,14 @@ onMounted(() => {
   channel.postMessage({ type: 'sync', targetId: targetId.value })
 })
 
+let scrollPending = false
 function scrollDown() {
-  nextTick(() => { if (msgEl.value) msgEl.value.scrollTop = msgEl.value.scrollHeight })
+  if (scrollPending) return
+  scrollPending = true
+  requestAnimationFrame(() => {
+    scrollPending = false
+    if (msgEl.value) msgEl.value.scrollTop = msgEl.value.scrollHeight
+  })
 }
 
 onUnmounted(() => {
@@ -150,6 +157,7 @@ onUnmounted(() => {
 .expert-name { font-weight: 600; color: #333; font-size: 0.9rem; }
 .timestamp { margin-left: auto; font-size: 0.75rem; color: #999; }
 .message-content { line-height: 1.6; font-size: 0.9rem; }
+.streaming-text { white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: 0.9rem; line-height: 1.6; margin: 0; }
 .streaming-cursor { display: inline; animation: blink 0.8s infinite; color: #3498db; font-weight: bold; }
 .empty-hint { text-align: center; color: #999; padding: 3rem 1rem; font-size: 0.9rem; line-height: 1.8; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
