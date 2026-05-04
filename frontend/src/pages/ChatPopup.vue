@@ -7,18 +7,6 @@
     </div>
     <div class="popup-body">
       <DocumentSidebar v-if="projectId" :projectId="projectId" class="popup-library" />
-      <div class="queue-sidebar" v-if="queueState.total >= 1">
-        <div class="queue-sidebar-header">📥 队列</div>
-        <div v-for="i in queueState.total" :key="i"
-          :class="['queue-sidebar-item', {
-            done: i < queueState.index,
-            current: i === queueState.index,
-            pending: i > queueState.index
-          }]">
-          <span class="queue-dot"></span>
-          <span>文件 {{ i }}</span>
-        </div>
-      </div>
       <div class="popup-messages" ref="msgEl">
         <div v-if="messages.length === 0" class="empty-hint">
           等待消息...<br><small>在编排画布上运行管道后，消息将在此显示</small>
@@ -38,6 +26,18 @@
         <span v-if="msg.streaming" class="streaming-cursor">▊</span>
       </div>
     </div>
+      <div class="queue-sidebar" v-if="queueState.total >= 1">
+        <div class="queue-sidebar-header">📥 队列</div>
+        <div v-for="i in queueState.total" :key="i"
+          :class="['queue-sidebar-item', {
+            done: i < queueState.index,
+            current: i === queueState.index,
+            pending: i > queueState.index
+          }]">
+          <span class="queue-dot"></span>
+          <span>文件 {{ i }}</span>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -94,9 +94,24 @@ onMounted(() => {
       return
     }
 
+    if (type === 'queue_start') {
+      queueState.value = { index: 0, total: data.total || 0 }
+      return
+    }
+
     if (type === 'queue_item_start') {
       queueState.value = { index: (data.index || 0) + 1, total: data.total || 0 }
       messages.value = []  // 清空上一份文件的聊天
+      return
+    }
+
+    if (type === 'queue_item_complete') {
+      // 文件处理完成，可以在这里添加完成标记
+      return
+    }
+
+    if (type === 'running_state') {
+      isRunning.value = data.isRunning || false
       return
     }
 
@@ -188,7 +203,7 @@ onUnmounted(() => {
 .chat-popup { height: calc(100vh - 42px); display: flex; flex-direction: column; background: #f5f5f5; overflow: hidden; }
 .popup-header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: white; border-bottom: 1px solid #e0e0e0; flex-shrink: 0; }
 .popup-body { flex: 1; display: flex; overflow: hidden; }
-.queue-sidebar { width: 140px; flex-shrink: 0; padding: 12px 8px; border-right: 1px solid #e0e0e0; background: #fafafa; overflow-y: auto; }
+.queue-sidebar { width: 140px; flex-shrink: 0; padding: 12px 8px; border-left: 1px solid #e0e0e0; background: #fafafa; overflow-y: auto; }
 .popup-library { width: 240px; flex-shrink: 0; border-right: 1px solid #e0e0e0; overflow-y: auto; }
 .queue-sidebar-header { font-size: 0.8rem; font-weight: 600; color: #666; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #eee; }
 .queue-sidebar-item { display: flex; align-items: center; gap: 6px; padding: 4px 6px; font-size: 0.78rem; border-radius: 4px; margin-bottom: 2px; }

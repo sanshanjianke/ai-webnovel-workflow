@@ -4,7 +4,11 @@
       <OrchestrationCanvas 
         :projectId="projectId" 
         :isRunning="isRunning"
+        :isPaused="isPaused"
+        :pipelineOutput="pipelineOutput"
         @run="onRun"
+        @stop="stopMeeting"
+        @toggle-pause="togglePause"
       />
     </div>
     <div class="pipeline-status" v-if="isRunning">
@@ -24,11 +28,15 @@ import OrchestrationCanvas from '../components/OrchestrationCanvas.vue'
 const route = useRoute()
 const projectId = computed(() => route.query.projectId || '')
 
-const isRunning = ref(false)
+// 从 sessionStorage 恢复状态
+const isRunning = ref(sessionStorage.getItem('meetingRunning') === 'true')
+const isPaused = ref(false)
 const speechCount = ref(0)
 const messageBuffer = reactive({})
 const queueState = ref({ index: 0, total: 0 })
+const pipelineOutput = ref(null)
 let chatChannel = null
+let pauseResolve = null
 
 onMounted(() => {
   chatChannel = new BroadcastChannel('meeting-chat')
@@ -42,6 +50,10 @@ onMounted(() => {
       if (queueState.value.total > 0) {
         chatChannel.postMessage({ type: 'queue_state', data: queueState.value })
       }
+      // 如果正在运行，发送运行状态
+      if (isRunning.value) {
+        chatChannel.postMessage({ type: 'running_state', data: { isRunning: true } })
+      }
     }
   }
 })
@@ -54,17 +66,28 @@ function onRun(config) {
   for (const key of Object.keys(messageBuffer)) delete messageBuffer[key]
   speechCount.value = 0
   isRunning.value = true
+  sessionStorage.setItem('meetingRunning', 'true')
   startMeeting(config)
 }
 
 function stopMeeting() {
   isRunning.value = false
+  isPaused.value = false
+  sessionStorage.removeItem('meetingRunning')
   chatChannel?.postMessage({ type: 'done' })
   if (projectId.value) {
     fetch(`/api/projects/${projectId.value}/meeting/feedback`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'stop' })
     }).catch(() => {})
+  }
+}
+
+function togglePause() {
+  isPaused.value = !isPaused.value
+  if (!isPaused.value && pauseResolve) {
+    pauseResolve()
+    pauseResolve = null
   }
 }
 
@@ -80,6 +103,11 @@ async function startMeeting(config) {
     const decoder = new TextDecoder()
     let buffer = ''
     while (true) {
+      // 暂停检查
+      if (isPaused.value) {
+        await new Promise(resolve => { pauseResolve = resolve })
+      }
+      
       const { done, value } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
@@ -106,17 +134,30 @@ async function startMeeting(config) {
 }
 
 function handleSSEEvent(type, data) {
+  console.log(`[SSE] ${type}`, data)
+  
   switch (type) {
     case 'queue_start':
+      console.log(`[QUEUE] 队列开始, 总文件数: ${data.total}`)
+      queueState.value = { index: 0, total: data.total || 0 }
+      broadcast(type, data)
+      break
     case 'queue_item_start':
+      console.log(`[QUEUE] 文件 ${data.index + 1}/${data.total} 开始处理`)
       queueState.value = { index: (data.index || 0) + 1, total: data.total || 0 }
       broadcast(type, data)
       break
+    case 'queue_item_complete':
+      console.log(`[QUEUE] 文件 ${data.index + 1}/${data.total} 处理完成`)
+      broadcast('queue_item_complete', data)
+      break
     case 'queue_complete':
+      console.log(`[QUEUE] 队列完成, 总文件数: ${data.total}`)
       queueState.value = { index: data.total || 0, total: data.total || 0 }
       broadcast(type, data)
       break
     case 'expert_speak':
+      console.log(`[EXPERT] ${data.expert_type} 完成发言, 文件 ${data.file_index + 1}`)
       speechCount.value = data.speech_count || (speechCount.value + 1)
       broadcast('message', data)
       break
@@ -124,12 +165,25 @@ function handleSSEEvent(type, data) {
       broadcast('chunk', data)
       break
     case 'expert_start':
+      console.log(`[EXPERT] ${data.expert_type} 开始处理文件 ${data.file_index + 1}`)
       speechCount.value = data.speech_count || (speechCount.value + 1)
       broadcast('expert_start', data)
       break
     case 'pipeline_complete':
       isRunning.value = false
+      sessionStorage.removeItem('meetingRunning')
+      pipelineOutput.value = data.output // 保存输出数据
       broadcast('done', { output: data.output })
+      // 向output节点发送最终结果
+      if (data.output && data.output.meeting_summary) {
+        broadcast('message', {
+          type: 'expert',
+          expert_type: '输出结果',
+          expert_id: 'output',
+          content: data.output.meeting_summary,
+          timestamp: new Date().toISOString()
+        })
+      }
       break
     case 'level_start':
     case 'level_complete':

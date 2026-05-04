@@ -95,6 +95,7 @@
           <button class="toolbar-btn" @click="addPlaceholder('splitter')" title="章节拆分师">✂️</button>
           <span class="toolbar-sep"></span>
           <button class="toolbar-btn" @click="addInputSource" title="输入源节点（队列.md文件）">📥</button>
+          <button class="toolbar-btn" @click="addOutput" title="输出节点（收集结果）">📤</button>
           <button class="toolbar-btn" @click="saveDesign" :disabled="!projectId || saveStatus === 'saving'" :title="saveStatus === 'saved' ? '已保存' : saveStatus === 'error' ? '保存失败' : '保存到文档库'">
             {{ saveStatus === 'saving' ? '⏳' : saveStatus === 'saved' ? '✅' : saveStatus === 'error' ? '❌' : '💾' }}
           </button>
@@ -271,7 +272,7 @@
       </div>
 
       <!-- ── 右侧面板：输入源队列 ── -->
-      <div class="config-panel" v-if="selectedNode && selectedNode.type === 'inputSource'"
+      <div class="config-panel" v-else-if="selectedNode && selectedNode.type === 'inputSource'"
         @dragover.prevent="onQueueDragOver"
         @dragleave="onQueueDragLeave"
         @drop.stop.prevent="onQueueDrop"
@@ -300,6 +301,31 @@
         </div>
       </div>
 
+      <!-- ── 右侧面板：输出节点 ── -->
+      <div class="config-panel" v-else-if="selectedNode && selectedNode.type === 'output'">
+        <div class="panel-header-row">
+          <h4>📤 输出节点</h4>
+          <button class="btn-back" @click="selectedNode = null">← 返回</button>
+        </div>
+        <div class="config-field">
+          <label>状态</label>
+          <div v-if="selectedNode.data.running" style="color: #3b82f6; font-weight: 600;">⏳ 运行中...</div>
+          <div v-else-if="selectedNode.data.done" style="color: #22c55e; font-weight: 600;">✅ 已完成</div>
+          <div v-else style="color: #999;">等待输入</div>
+        </div>
+        <div class="config-field" v-if="selectedNode.data.done">
+          <label>操作</label>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <button class="btn btn-sm btn-primary" @click="openNodeChatTab(selectedNode)">打开聊天窗口查看结果</button>
+            <button class="btn btn-sm" @click="downloadOutput">📥 下载文件</button>
+            <button class="btn btn-sm" @click="transferToLibrary">📚 转移到文档库</button>
+          </div>
+        </div>
+        <div class="config-actions">
+          <button class="btn btn-danger btn-sm" @click="removeNode">删除节点</button>
+        </div>
+      </div>
+
       <!-- ── 右侧面板：会议总配置 ── -->
       <div class="config-panel" v-else>
         <h4>当前配置</h4>
@@ -310,16 +336,21 @@
           </div>
         </div>
         <button 
-          class="btn btn-run" 
-          :class="props.isRunning ? 'btn-running' : 'btn-primary'"
+          v-if="!props.isRunning"
+          class="btn btn-run btn-primary" 
           @click="runMeeting" 
-          :disabled="orderedNodes.length === 0 || props.isRunning"
+          :disabled="orderedNodes.length === 0"
         >
-          {{ props.isRunning ? '● 运行中' : '开始流程' }}
+          开始流程
         </button>
-        <button class="btn btn-outline btn-save" style="width:100%; margin-top:6px;" @click="saveDesign" :disabled="!projectId || saveStatus === 'saving'">
-          {{ saveStatus === 'saving' ? '保存中...' : saveStatus === 'saved' ? '已保存 ✓' : saveStatus === 'error' ? '保存失败 ✗' : '清空' }}
-        </button>
+        <template v-else>
+          <button class="btn btn-run" :class="props.isPaused ? 'btn-primary' : 'btn-warning'" @click="togglePause">
+            {{ props.isPaused ? '▶ 继续' : '⏸ 暂停' }}
+          </button>
+          <button class="btn btn-outline btn-danger" style="width:100%; margin-top:6px;" @click="stopMeeting">
+            ⏹ 中止
+          </button>
+        </template>
         <button class="btn btn-outline btn-clear" @click="clearCanvas">清空画布</button>
       </div>
     </div>
@@ -438,14 +469,19 @@ import axios from 'axios'
 import ExpertNode from './ExpertNode.vue'
 import GroupNode from './GroupNode.vue'
 import InputSourceNode from './InputSourceNode.vue'
+import OutputNode from './OutputNode.vue'
+import JSZip from 'jszip'
+import { saveAs } from 'file-saver'
 
-const emit = defineEmits(['run'])
+const emit = defineEmits(['run', 'stop', 'toggle-pause'])
 const props = defineProps({
   projectId: { type: String, default: '' },
-  isRunning: { type: Boolean, default: false }
+  isRunning: { type: Boolean, default: false },
+  isPaused: { type: Boolean, default: false },
+  pipelineOutput: { type: Object, default: null }
 })
 
-const nodeTypes = { expert: markRaw(ExpertNode), container: markRaw(GroupNode), inputSource: markRaw(InputSourceNode) }
+const nodeTypes = { expert: markRaw(ExpertNode), container: markRaw(GroupNode), inputSource: markRaw(InputSourceNode), output: markRaw(OutputNode) }
 
 const nodes = ref([])
 const edges = ref([])
@@ -987,6 +1023,13 @@ const orderedNodes = computed(() => {
 })
 
 function runMeeting() {
+  // 更新输出节点状态为运行中
+  const outputNodes = nodes.value.filter(n => n.type === 'output')
+  outputNodes.forEach(n => {
+    n.data.running = true
+    n.data.done = false
+  })
+
   const experts = orderedNodes.value.map(node => ({
     expert_id: node.data.expertId,
     node_id: node.id,
@@ -1041,6 +1084,15 @@ function runMeeting() {
       return !isInterContainer
     }).map(e => ({ source: e.source, target: e.target }))
   })
+}
+
+function togglePause() {
+  emit('toggle-pause')
+}
+
+function stopMeeting() {
+  isPaused.value = false
+  emit('stop')
 }
 
 function clearCanvas() {
@@ -1108,6 +1160,17 @@ function updateContainerChildren() {
 watch(() => nodes.value.length, () => { updateContainerChildren() })
 watch(() => nodes.value.map(n => n.parentNode).join(','), () => { updateContainerChildren() }, { immediate: true })
 
+// 监听isRunning变化，更新输出节点状态
+watch(() => props.isRunning, (running) => {
+  const outputNodes = nodes.value.filter(n => n.type === 'output')
+  outputNodes.forEach(n => {
+    n.data.running = running
+    if (!running) {
+      n.data.done = true
+    }
+  })
+})
+
 // ── 占位节点 ──
 
 function addPlaceholder(type) {
@@ -1152,6 +1215,15 @@ function addInputSource() {
   updateInputSourceHighlight()
 }
 
+function addOutput() {
+  const id = `output_${++nodeCounter}`
+  nodes.value.push({
+    id, type: 'output', position: { x: 800, y: 300 },
+    data: { label: '输出', running: false, done: false, selected: false },
+    style: { zIndex: 5 }
+  })
+}
+
 function onNodeClick({ node }) {
   selectedNode.value = node
   if (node.type === 'expert') {
@@ -1160,6 +1232,8 @@ function onNodeClick({ node }) {
     loadContainerConfig(node)
   } else if (node.type === 'inputSource') {
     showQueuePanel.value = true
+  } else if (node.type === 'output') {
+    // 输出节点单击时只选中，显示属性面板
   }
 }
 
@@ -1181,6 +1255,8 @@ function openNodeChatTab(node) {
     const label = getExpertLabel(eid) || eid
     params += `&expertId=${encodeURIComponent(eid)}&name=${encodeURIComponent(label)}`
     if (node.parentNode) params += `&containerId=${encodeURIComponent(node.parentNode)}`
+  } else if (node.type === 'output') {
+    params += `&expertId=output&name=${encodeURIComponent(node.data.label || '输出')}`
   }
   window.open(`/chat-popup?${params}`, '_blank')
 }
@@ -1202,6 +1278,8 @@ function openChatNewWindow() {
     const c = nodes.value.find(x => x.id === n.nodeId)
     const name = c?.data?.name || '容器'
     params += `&containerId=${encodeURIComponent(n.nodeId)}&name=${encodeURIComponent(name)}`
+  } else if (n.type === 'output') {
+    params += `&expertId=output&name=${encodeURIComponent(n.nodeData?.label || '输出')}`
   } else {
     const eid = n.nodeData?.expertId
     const label = getExpertLabel(eid) || eid
@@ -1219,6 +1297,91 @@ function openChatInline() {
 }
 
 function hideNodeCtx() { nodeCtx.show = false }
+
+async function downloadOutput() {
+  if (!props.pipelineOutput || !props.pipelineOutput.node_outputs) {
+    alert('没有可下载的输出数据')
+    return
+  }
+
+  const nodeOutputs = props.pipelineOutput.node_outputs
+  const keys = Object.keys(nodeOutputs)
+
+  if (keys.length === 0) {
+    alert('没有可下载的输出数据')
+    return
+  }
+
+  if (keys.length === 1) {
+    // 单个文件直接下载
+    const content = nodeOutputs[keys[0]]
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+    saveAs(blob, `${keys[0]}.md`)
+  } else {
+    // 多个文件打包为zip
+    const zip = new JSZip()
+    for (const [nodeId, content] of Object.entries(nodeOutputs)) {
+      zip.file(`${nodeId}.md`, content)
+    }
+    const blob = await zip.generateAsync({ type: 'blob' })
+    saveAs(blob, 'pipeline_output.zip')
+  }
+}
+
+async function transferToLibrary() {
+  if (!props.pipelineOutput || !props.pipelineOutput.node_outputs) {
+    alert('没有可转移的输出数据')
+    return
+  }
+
+  if (!props.projectId) {
+    alert('未关联项目，无法转移到文档库')
+    return
+  }
+
+  const nodeOutputs = props.pipelineOutput.node_outputs
+  const keys = Object.keys(nodeOutputs)
+
+  if (keys.length === 0) {
+    alert('没有可转移的输出数据')
+    return
+  }
+
+  try {
+    if (keys.length === 1) {
+      // 单个文件直接导入
+      const content = nodeOutputs[keys[0]]
+      const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+      const formData = new FormData()
+      formData.append('file', blob, `${keys[0]}.md`)
+      formData.append('directory', '/管道输出')
+      
+      await axios.post(`/api/projects/${props.projectId}/library/import`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      alert('已转移到文档库')
+    } else {
+      // 多个文件打包为zip后导入
+      const zip = new JSZip()
+      for (const [nodeId, content] of Object.entries(nodeOutputs)) {
+        zip.file(`${nodeId}.md`, content)
+      }
+      const blob = await zip.generateAsync({ type: 'blob' })
+      
+      const formData = new FormData()
+      formData.append('file', blob, 'pipeline_output.zip')
+      formData.append('directory', '/管道输出')
+      
+      await axios.post(`/api/projects/${props.projectId}/library/import`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      alert('已转移到文档库')
+    }
+  } catch (err) {
+    console.error('转移到文档库失败:', err)
+    alert('转移到文档库失败: ' + (err.response?.data?.detail || err.message))
+  }
+}
 </script>
 
 <style scoped>
@@ -1281,6 +1444,9 @@ function hideNodeCtx() { nodeCtx.show = false }
 .canvas-area { flex: 1; position: relative; transition: background 0.2s; border-radius: 4px; }
 .canvas-area.drag-over-canvas { background: rgba(52, 152, 219, 0.08); box-shadow: inset 0 0 0 2px #3498db; }
 .flow-canvas { width: 100%; height: 100%; }
+/* 修复输出节点边框问题 */
+.flow-canvas :deep(.vue-flow__node-output) { border: none !important; outline: none !important; box-shadow: none !important; background: transparent !important; padding: 0 !important; }
+.flow-canvas :deep(.vue-flow__node-output.selected) { box-shadow: none !important; }
 
 .config-panel { width: 280px; background: white; border-left: 1px solid #e0e0e0; padding: 14px; overflow-y: auto; }
 .config-panel h4 { font-size: 0.85rem; color: #666; margin: 0; padding-bottom: 6px; border-bottom: 1px solid #eee; }

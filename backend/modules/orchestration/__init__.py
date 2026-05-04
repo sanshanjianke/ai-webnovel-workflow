@@ -578,9 +578,11 @@ class MeetingEngine:
         rag_context: str = "",
         human_feedback=None,
     ) -> Generator[dict, None, Optional[dict]]:
-        """管道模式：按 DAG 拓扑顺序逐节点处理，数据沿边流动"""
+        """管道模式：处理单个文件，按 DAG 拓扑顺序逐节点处理，数据沿边流动
+        
+        注意：此方法只处理单个文件，文件遍历由调用者（pipeline_stream）负责
+        """
         self._state = "running"
-        self._speech_count = 0
         self._init_containers()
 
         # 构建节点图：vue_node_id → expert_id 映射
@@ -641,16 +643,21 @@ class MeetingEngine:
                     if in_degree[tgt] == 0:
                         queue.append(tgt)
 
-        # 节点输出缓存
+        # 节点输出缓存（当前文件的各节点输出）
         node_outputs: dict[str, str] = {}
 
-        yield {"type": "pipeline_start", "levels": len(topo_levels), "nodes": len(all_node_ids)}
+        # 调试日志
+        import logging
+        logger = logging.getLogger("pipeline")
+        file_idx = context_input.get("queue_index", 1) - 1
+        logger.warning(f"[PIPELINE] 开始处理单个文件: file_index={file_idx}, levels={len(topo_levels)}, nodes={list(all_node_ids)}")
 
         for level_idx, level in enumerate(topo_levels):
-            yield {"type": "level_start", "level": level_idx + 1, "total_levels": len(topo_levels), "nodes": level}
+            logger.warning(f"[PIPELINE] 文件 {file_idx + 1}, 层级 {level_idx + 1}/{len(topo_levels)}, 节点: {level}")
+            yield {"type": "level_start", "level": level_idx + 1, "total_levels": len(topo_levels), "nodes": level, "file_index": file_idx}
 
             for nid in level:
-                # 收集上游输入并映射到正确的上下文字段
+                # 收集上游输入（当前文件的上游节点输出）
                 upstream_outputs = []
                 for other_nid, targets in out_edges.items():
                     if nid in targets and other_nid in node_outputs:
@@ -670,6 +677,7 @@ class MeetingEngine:
                     output_parts = []
                     for (eid, role) in pool:
                         expert = self.get_expert(eid, role)
+                        logger.warning(f"[PIPELINE] 文件 {file_idx + 1}, 容器 {nid}, 专家 {expert.expert_type} 开始处理")
                         ctx = {
                             "vision": context_input,
                             "worldbook": worldbook_text,
@@ -680,20 +688,21 @@ class MeetingEngine:
                         self._inject_upstream_context(ctx, upstream_outputs, node_map, input_text)
                         self._inject_history_context(ctx)
                         self._speech_count += 1
-                        yield {"type": "expert_start", "expert_id": eid, "expert_type": expert.expert_type, "role": role.value, "container_id": nid, "level": level_idx + 1}
+                        yield {"type": "expert_start", "expert_id": eid, "expert_type": expert.expert_type, "role": role.value, "container_id": nid, "level": level_idx + 1, "file_index": file_idx}
                         full_content = ""
                         for chunk in expert.speak_stream(None, ctx):
                             if isinstance(chunk, tuple) and chunk[0] == "__done__":
                                 opinion = chunk[1]
                             elif isinstance(chunk, tuple):
                                 chunk_type, chunk_content = chunk
-                                yield {"type": "expert_chunk", "chunk_type": chunk_type, "content": chunk_content, "expert_id": eid, "container_id": nid, "level": level_idx + 1}
+                                yield {"type": "expert_chunk", "chunk_type": chunk_type, "content": chunk_content, "expert_id": eid, "container_id": nid, "level": level_idx + 1, "file_index": file_idx}
                                 if chunk_type == "content":
                                     full_content += chunk_content
                         opinion.role = role
                         container_history.append((eid, role.value, full_content))
                         output_parts.append(f"### {expert.expert_type}\n{full_content}")
-                        yield {"type": "expert_speak", "expert_id": eid, "expert_type": expert.expert_type, "role": role.value, "content": full_content, "suggestions": opinion.suggestions, "container_id": nid, "level": level_idx + 1}
+                        logger.warning(f"[PIPELINE] 文件 {file_idx + 1}, 容器 {nid}, 专家 {expert.expert_type} 完成处理, 内容长度: {len(full_content)}")
+                        yield {"type": "expert_speak", "expert_id": eid, "expert_type": expert.expert_type, "role": role.value, "content": full_content, "suggestions": opinion.suggestions, "container_id": nid, "level": level_idx + 1, "file_index": file_idx}
                     node_outputs[nid] = "\n\n".join(output_parts)
                 else:
                     # 单独专家节点
@@ -701,6 +710,7 @@ class MeetingEngine:
                     if experts:
                         exp = experts[0]
                         expert = self.get_expert(exp["expert_id"], ExpertRole(exp["role"]))
+                        logger.warning(f"[PIPELINE] 文件 {file_idx + 1}, 节点 {nid}, 专家 {expert.expert_type} 开始处理")
                         ctx = {
                             "vision": context_input,
                             "worldbook": worldbook_text,
@@ -710,32 +720,31 @@ class MeetingEngine:
                         }
                         self._inject_upstream_context(ctx, upstream_outputs, node_map, input_text)
                         self._speech_count += 1
-                        yield {"type": "expert_start", "expert_id": exp["expert_id"], "expert_type": expert.expert_type, "role": exp["role"], "node_id": nid, "level": level_idx + 1}
+                        yield {"type": "expert_start", "expert_id": exp["expert_id"], "expert_type": expert.expert_type, "role": exp["role"], "node_id": nid, "level": level_idx + 1, "file_index": file_idx}
                         full_content = ""
                         for chunk in expert.speak_stream(None, ctx):
                             if isinstance(chunk, tuple) and chunk[0] == "__done__":
                                 opinion = chunk[1]
                             elif isinstance(chunk, tuple):
                                 chunk_type, chunk_content = chunk
-                                yield {"type": "expert_chunk", "chunk_type": chunk_type, "content": chunk_content, "expert_id": exp["expert_id"], "node_id": nid, "level": level_idx + 1}
+                                yield {"type": "expert_chunk", "chunk_type": chunk_type, "content": chunk_content, "expert_id": exp["expert_id"], "node_id": nid, "level": level_idx + 1, "file_index": file_idx}
                                 if chunk_type == "content":
                                     full_content += chunk_content
                         opinion.role = ExpertRole(exp["role"])
                         node_outputs[nid] = full_content
-                        yield {"type": "expert_speak", "expert_id": exp["expert_id"], "expert_type": expert.expert_type, "role": exp["role"], "content": full_content, "suggestions": opinion.suggestions, "node_id": nid, "level": level_idx + 1}
+                        logger.warning(f"[PIPELINE] 文件 {file_idx + 1}, 节点 {nid}, 专家 {expert.expert_type} 完成处理, 内容长度: {len(full_content)}")
+                        yield {"type": "expert_speak", "expert_id": exp["expert_id"], "expert_type": expert.expert_type, "role": exp["role"], "content": full_content, "suggestions": opinion.suggestions, "node_id": nid, "level": level_idx + 1, "file_index": file_idx}
                     else:
-                        yield {"type": "node_skip", "node_id": nid, "reason": "no expert"}
+                        yield {"type": "node_skip", "node_id": nid, "reason": "no expert", "file_index": file_idx}
 
                 if human_feedback:
                     pass  # 管道模式下不阻塞，用户通过停止按钮控制
 
-            yield {"type": "level_complete", "level": level_idx + 1}
+            yield {"type": "level_complete", "level": level_idx + 1, "file_index": file_idx}
 
+        logger.warning(f"[PIPELINE] 文件 {file_idx + 1} 处理完成, 节点输出: {list(node_outputs.keys())}")
         self._state = "completed"
-        pipeline_summary = "\n\n---\n\n".join(f"## {nid}\n\n{content}" for nid, content in node_outputs.items())
-        output = {"node_outputs": node_outputs, "total_speeches": self._speech_count, "meeting_summary": pipeline_summary}
-        yield {"type": "pipeline_complete", "output": output}
-        return output
+        return {"node_outputs": node_outputs, "total_speeches": self._speech_count}
 
 
 # ── 预置模板 ────────────────────────────────────────────────
