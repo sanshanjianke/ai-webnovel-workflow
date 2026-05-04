@@ -11,7 +11,7 @@
 | 指标 | 数值 |
 |------|------|
 | 阶段 | 原型开发，全流程打通 |
-| 后端 | ~6200 行 Python，17 个注册模块，73 条 API 路由 |
+| 后端 | Python (~6200 行) + Node.js (~3000 行) 双版本 |
 | 前端 | ~8500 行 Vue 3，10 页面 + Vue Flow 编排画布 |
 | 测试 | 37/37 通过 |
 | 待完成 | L3/L4 多技能体系、L3 向量映射库、混合检索器集成 |
@@ -20,15 +20,25 @@
 
 ## 快速开始
 
+### Node.js 后端（推荐）
+
 ```bash
 git clone <repo> && cd talk
-source venv/bin/activate
-./start.sh                          # 后端 :7860
+./start.sh                          # 启动 Node.js 后端 :7860
 
 cd frontend && npm install && npm run dev  # 前端 :5173
 
 # 配置 API 密钥
 编辑 data/user/config.yaml
+```
+
+### Python 后端（旧版）
+
+```bash
+git clone <repo> && cd talk
+./start.sh python                   # 启动 Python 后端 :7860
+
+cd frontend && npm install && npm run dev  # 前端 :5173
 ```
 
 ---
