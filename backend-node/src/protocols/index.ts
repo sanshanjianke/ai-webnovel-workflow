@@ -37,6 +37,8 @@ export interface LLMOptions {
   temperature?: number;
   maxTokens?: number;
   model?: string;
+  thinking?: boolean;
+  thinkingBudget?: number;
 }
 
 export interface LLMChunk {
@@ -281,16 +283,16 @@ export interface PipelineStageConfig {
 // ============ L1 愿景文档 ============
 
 export interface VisionDocument {
-  coreIdea: string;
-  targetReaders?: string;
-  coreAppeal?: string;
+  core_idea: string;
+  target_readers?: string;
+  core_appeal?: string;
   style?: string;
-  roughOutline?: string;
-  worldSetting?: string;
+  rough_outline?: string;
+  world_setting?: string;
   protagonist?: string;
-  goldenFinger?: string;
-  hotElements?: string;
-  expectedLength?: string;
+  golden_finger?: string;
+  hot_elements?: string;
+  expected_length?: string;
 }
 
 // ============ L3 章纲 ============

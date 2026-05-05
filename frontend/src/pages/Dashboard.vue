@@ -29,7 +29,7 @@
         <h2>新建项目</h2>
         <div class="form-group">
           <label>项目名称</label>
-          <input v-model="newProject.name" type="text" placeholder="输入项目名称">
+          <input v-model="newProject.name" type="text" placeholder="输入项目名称" @keyup.enter="createProject">
         </div>
         <div class="form-group">
           <label>类型</label>
@@ -38,14 +38,6 @@
         <div class="form-group">
           <label>目标平台</label>
           <input v-model="newProject.target_platform" type="text" placeholder="如: 起点、晋江">
-        </div>
-        <div class="form-group">
-          <label>驱动模式</label>
-          <select v-model="newProject.driving_mode">
-            <option value="plot_driven">剧情驱动</option>
-            <option value="character_driven">人物驱动</option>
-            <option value="market_driven">市场驱动</option>
-          </select>
         </div>
         <div class="modal-actions">
           <button class="btn btn-primary" @click="createProject">创建</button>
@@ -65,8 +57,7 @@ const showCreateModal = ref(false)
 const newProject = ref({
   name: '',
   genre: '',
-  target_platform: '',
-  driving_mode: 'plot_driven'
+  target_platform: ''
 })
 
 const fetchProjects = async () => {
@@ -78,7 +69,7 @@ const createProject = async () => {
   if (!newProject.value.name) return
   await axios.post('/api/projects/', newProject.value)
   showCreateModal.value = false
-  newProject.value = { name: '', genre: '', target_platform: '', driving_mode: 'plot_driven' }
+  newProject.value = { name: '', genre: '', target_platform: '' }
   fetchProjects()
 }
 

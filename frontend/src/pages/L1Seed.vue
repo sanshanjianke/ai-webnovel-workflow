@@ -46,7 +46,14 @@
               </template>
               <!-- AI消息编辑 -->
               <template v-else-if="msg.editing && msg.role === 'ai'">
-                <textarea v-model="msg.editContent" class="edit-textarea"></textarea>
+                <div v-if="msg.thinking" class="edit-section">
+                  <label>思考过程：</label>
+                  <textarea v-model="msg.editThinking" class="edit-textarea thinking"></textarea>
+                </div>
+                <div class="edit-section">
+                  <label>正文内容：</label>
+                  <textarea v-model="msg.editContent" class="edit-textarea"></textarea>
+                </div>
                 <div class="edit-actions">
                   <button class="btn-small btn-primary" @click="saveEditOnly(idx)">保存</button>
                   <button class="btn-small" @click="cancelEdit(idx)">取消</button>
@@ -147,7 +154,14 @@
         </div>
         
         <!-- 表单视图 -->
-        <div v-show="rightTab === 'form'" class="panel-content form-content">
+        <div 
+          v-show="rightTab === 'form'" 
+          class="panel-content form-content"
+          @dragover.prevent="onFormDragOver"
+          @dragleave="onFormDragLeave"
+          @drop.prevent="onFormDrop"
+          :class="{ 'drag-over': isFormDragOver }"
+        >
           <div class="form-header">
             <h3>故事要素</h3>
             <span class="sync-status" :class="{ synced: isSynced }">
@@ -213,7 +227,8 @@
             <button class="btn btn-primary" @click="generateVision" :disabled="loading">
               {{ loading ? '生成中...' : '🎯 生成愿景文档' }}
             </button>
-            <button class="btn" @click="loadVision">加载已有</button>
+            <button class="btn" @click="saveFormToLibrary" title="保存表单到文档库">💾 保存表单</button>
+            <button class="btn" @click="showPromptEditor = true" title="查看和编辑提示词">⚙️ Skill</button>
           </div>
         </div>
         
@@ -229,7 +244,10 @@
               <button v-if="showRaw" class="btn btn-small btn-primary" @click="saveVisionEdit">
                 保存到文档库
               </button>
-              <button v-if="!showRaw" class="btn btn-small btn-primary" @click="downloadVision">
+              <button v-if="!showRaw" class="btn btn-small btn-primary" @click="saveVisionToLibrary">
+                💾 保存
+              </button>
+              <button v-if="!showRaw" class="btn btn-small" @click="downloadVision">
                 下载
               </button>
             </div>
@@ -240,17 +258,30 @@
           </div>
           
           <div 
-            v-if="vision" 
+            v-if="vision && (vision.content || vision.thinking)" 
             class="preview-body"
             @dragover.prevent="onVisionDragOver"
             @dragleave="onVisionDragLeave"
             @drop.prevent="onVisionDrop"
             :class="{ 'drag-over': isVisionDragOver }"
           >
-            <!-- 结构化展示 - 解析后的Markdown -->
-            <div v-if="!showRaw" class="vision-structured" v-html="renderMarkdown(formattedVisionDocument)"></div>
+            <!-- Think 内容（可折叠） -->
+            <div v-if="hasThinking" class="thinking-section">
+              <div class="thinking-header" @click="showThinking = !showThinking">
+                <span class="thinking-toggle">{{ showThinking ? '▼' : '▶' }}</span>
+                <span>💭 思考过程</span>
+                <span class="thinking-hint">{{ loading ? '生成中...' : '点击展开' }}</span>
+              </div>
+              <div v-show="showThinking" class="thinking-content">
+                <pre>{{ vision.thinking }}</pre>
+              </div>
+            </div>
             
-            <!-- 原文展示 - 可编辑的Markdown文本 -->
+            <!-- 正文内容 -->
+            <div v-if="loading && !vision.content" class="generating-indicator">
+              <span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
+            </div>
+            <div v-if="!showRaw" class="vision-structured" v-html="renderMarkdown(formattedVisionDocument)"></div>
             <textarea v-else class="vision-raw-editor" v-model="editableVisionDocument"></textarea>
           </div>
           
@@ -300,6 +331,33 @@
         </div>
         <div class="settings-footer">
           <button class="btn btn-primary" @click="closeSettings">确定</button>
+        </div>
+      </div>
+    </div>
+  </teleport>
+  
+  <!-- 提示词编辑弹窗 -->
+  <teleport to="body">
+    <div v-if="showPromptEditor" class="settings-modal" @click="showPromptEditor = false">
+      <div class="prompt-editor-panel" @click.stop>
+        <div class="settings-header">
+          <h3>⚙️ Skill - 提示词编辑</h3>
+          <button class="btn-close" @click="showPromptEditor = false">×</button>
+        </div>
+        <div class="prompt-editor-body">
+          <div class="prompt-hint">
+            <p>提示词中 <code>{user_input}</code> 会被替换为表单内容</p>
+            <button class="btn btn-small" @click="customPrompt = defaultPrompt">恢复默认</button>
+          </div>
+          <textarea 
+            v-model="customPrompt" 
+            :placeholder="defaultPrompt"
+            class="prompt-textarea"
+          ></textarea>
+        </div>
+        <div class="settings-footer">
+          <button class="btn" @click="showPromptEditor = false">取消</button>
+          <button class="btn btn-primary" @click="showPromptEditor = false">确定</button>
         </div>
       </div>
     </div>
@@ -614,6 +672,27 @@ const hasUnsavedChanges = computed(() => {
   return editableVisionDocument.value !== lastSavedContent.value
 })
 
+// 提示词编辑
+const showPromptEditor = ref(false)
+const customPrompt = ref('')
+const defaultPrompt = `你是一位创作顾问，帮助用户梳理创意愿景，产出清晰的故事种子文档。
+
+用户提供的信息：
+{user_input}
+
+请根据以上信息，生成一份完整的《故事愿景文档》。要求：
+1. 直接输出文档内容，不要有多余的解释
+2. 使用 markdown 格式
+3. 包含以下部分：核心梗、阅读契约、粗略大纲、核心设定、热点元素、预期字数
+4. 内容要具体、有指导意义，不要泛泛而谈
+5. 如果用户信息不足，合理补充但要符合用户意图`
+
+// 表单拖拽
+const isFormDragOver = ref(false)
+
+// Think 内容显示
+const showThinking = ref(false)
+
 // 愿景文档拖放
 const onVisionDragOver = (event) => {
   isVisionDragOver.value = true
@@ -708,6 +787,31 @@ const saveVisionEdit = async () => {
   }
 }
 
+const saveVisionToLibrary = async () => {
+  if (!projectId.value || !vision.value?.content) return
+  
+  try {
+    const timestamp = new Date().toISOString().slice(0, 16).replace('T', ' ')
+    const name = `L1 愿景 — ${timestamp}`
+    
+    await axios.post(`/api/projects/${projectId.value}/library`, {
+      name,
+      layer: 'l1',
+      source: 'generate',
+      content: vision.value,
+      directory: '/',
+      tags: ['愿景文档']
+    })
+    
+    // 刷新文档库
+    window.postMessage({ type: 'library-refresh' }, '*')
+    alert('已保存到文档库')
+  } catch (err) {
+    console.error('保存失败:', err)
+    alert('保存失败')
+  }
+}
+
 const applyAsVision = async () => {
   if (!projectId.value) return
   
@@ -766,6 +870,13 @@ const isSynced = computed(() => {
 // 计算属性：格式化愿景文档
 const formattedVisionDocument = computed(() => {
   if (!vision.value) return ''
+  
+  // 如果是新格式（直接包含 content 字段）
+  if (vision.value.content) {
+    return vision.value.content
+  }
+  
+  // 兼容旧格式（按字段拼接）
   const v = vision.value
   return `# 故事愿景文档
 
@@ -795,6 +906,11 @@ ${v.expected_length || '未设置'}
 生成时间: ${new Date().toLocaleString()}
 项目ID: ${projectId.value}
 `
+})
+
+// 计算属性：是否有 think 内容
+const hasThinking = computed(() => {
+  return vision.value?.thinking && vision.value.thinking.length > 0
 })
 
 // 监听格式化文档变化，仅在非编辑状态时同步
@@ -929,7 +1045,7 @@ const sendMessage = async () => {
             const data = JSON.parse(line.slice(6))
             if (data.type === 'thinking') {
               chatMessages.value[aiMsgIdx].thinking += data.content
-              chatMessages.value[aiMsgIdx].showThinking = true
+              // 不自动展开，让用户自己决定
             } else if (data.type === 'chunk') {
               chatMessages.value[aiMsgIdx].content += data.content
               scrollToBottom()
@@ -939,9 +1055,6 @@ const sendMessage = async () => {
               }
               if (data.content) {
                 chatMessages.value[aiMsgIdx].content = data.content
-              }
-              if (data.extracted) {
-                Object.assign(form.value, data.extracted)
               }
             }
           } catch (e) {}
@@ -1017,7 +1130,7 @@ const regenerateMessage = async (idx) => {
             const data = JSON.parse(line.slice(6))
             if (data.type === 'thinking') {
               chatMessages.value[aiMsgIdx].thinking += data.content
-              chatMessages.value[aiMsgIdx].showThinking = true
+              // 不自动展开，让用户自己决定
             } else if (data.type === 'chunk') {
               chatMessages.value[aiMsgIdx].content += data.content
               scrollToBottom()
@@ -1054,11 +1167,15 @@ const regenerateMessage = async (idx) => {
 const startEdit = (idx) => {
   chatMessages.value[idx].editing = true
   chatMessages.value[idx].editContent = chatMessages.value[idx].content
+  if (chatMessages.value[idx].thinking) {
+    chatMessages.value[idx].editThinking = chatMessages.value[idx].thinking
+  }
 }
 
 const cancelEdit = (idx) => {
   chatMessages.value[idx].editing = false
   delete chatMessages.value[idx].editContent
+  delete chatMessages.value[idx].editThinking
 }
 
 // 仅保存编辑，不触发AI生成
@@ -1068,8 +1185,15 @@ const saveEditOnly = (idx) => {
   
   // 更新消息内容
   chatMessages.value[idx].content = newContent
+  
+  // 更新思考过程（如果有）
+  if (chatMessages.value[idx].editThinking !== undefined) {
+    chatMessages.value[idx].thinking = chatMessages.value[idx].editThinking
+  }
+  
   chatMessages.value[idx].editing = false
   delete chatMessages.value[idx].editContent
+  delete chatMessages.value[idx].editThinking
 }
 
 // 保存编辑并触发AI生成
@@ -1133,7 +1257,7 @@ const saveEditAndGenerate = async (idx) => {
             const data = JSON.parse(line.slice(6))
             if (data.type === 'thinking') {
               chatMessages.value[aiMsgIdx].thinking += data.content
-              chatMessages.value[aiMsgIdx].showThinking = true
+              // 不自动展开，让用户自己决定
             } else if (data.type === 'chunk') {
               chatMessages.value[aiMsgIdx].content += data.content
               scrollToBottom()
@@ -1260,12 +1384,135 @@ const formatTime = (date) => {
 const generateVision = async () => {
   if (!projectId.value) return
   loading.value = true
+  
+  // 清空之前的vision
+  vision.value = null
+  rightTab.value = 'preview'
+  
   try {
-    const res = await axios.post(`/api/projects/${projectId.value}/l1/generate`, form.value)
-    vision.value = res.data.vision
-    rightTab.value = 'preview'
+    const payload = {
+      ...form.value,
+      custom_prompt: customPrompt.value || undefined
+    }
+    
+    // 使用 fetch + ReadableStream 进行 SSE 流式接收
+    const response = await fetch(`/api/projects/${projectId.value}/l1/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let content = ''
+    let thinking = ''
+    
+    // 初始化vision对象
+    vision.value = { content: '', thinking: '' }
+    
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed || !trimmed.startsWith('data: ')) continue
+        
+        try {
+          const data = JSON.parse(trimmed.slice(6))
+          
+          if (data.type === 'content') {
+            content += data.content
+            vision.value = { ...vision.value, content }
+          } else if (data.type === 'thinking') {
+            thinking += data.content
+            vision.value = { ...vision.value, thinking }
+          } else if (data.type === 'done') {
+            vision.value = { content: data.content, thinking: data.thinking }
+          } else if (data.type === 'error') {
+            throw new Error(data.message)
+          }
+        } catch (e) {
+          // 忽略解析错误
+        }
+      }
+    }
+  } catch (e) {
+    console.error('生成失败:', e)
+    alert('生成失败: ' + e.message)
   } finally {
     loading.value = false
+  }
+}
+
+const saveFormToLibrary = async () => {
+  if (!projectId.value) return
+  
+  // 检查是否有内容
+  const hasContent = Object.values(form.value).some(v => v && v.trim())
+  if (!hasContent) {
+    alert('表单为空，请先填写内容')
+    return
+  }
+  
+  try {
+    const name = `表单草稿 — ${form.value.idea?.slice(0, 20) || '未命名'}`
+    await axios.post(`/api/projects/${projectId.value}/library`, {
+      name,
+      layer: 'l1_form',
+      content: form.value,
+      source: 'manual',
+      directory: '/',
+      tags: ['表单', '草稿']
+    })
+    
+    // 刷新文档库
+    window.postMessage({ type: 'library-refresh' }, '*')
+    alert('表单已保存到文档库')
+  } catch (e) {
+    console.error('保存表单失败:', e)
+    alert('保存失败')
+  }
+}
+
+// 表单拖拽处理
+const onFormDragOver = (event) => {
+  isFormDragOver.value = true
+}
+
+const onFormDragLeave = (event) => {
+  isFormDragOver.value = false
+}
+
+const onFormDrop = async (event) => {
+  isFormDragOver.value = false
+  
+  const docInfo = event.dataTransfer.getData('application/json')
+  if (!docInfo) return
+  
+  try {
+    const doc = JSON.parse(docInfo)
+    
+    // 加载文档内容
+    const res = await axios.get(`/api/projects/${projectId.value}/library/${doc.uid}`)
+    const data = res.data
+    
+    // 如果是表单草稿，导入到表单
+    if (data.entry?.layer === 'l1_form' && data.content) {
+      const content = typeof data.content === 'string' ? JSON.parse(data.content) : data.content
+      form.value = { ...form.value, ...content }
+      alert('表单内容已导入')
+    } else {
+      alert('只能导入类型为「表单草稿」的文档')
+    }
+  } catch (err) {
+    console.error('导入表单失败:', err)
+    alert('导入失败')
   }
 }
 
@@ -1700,6 +1947,24 @@ onMounted(() => {
   box-sizing: border-box;
 }
 
+.edit-textarea.thinking {
+  min-height: 80px;
+  background: #f8f9fa;
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.edit-section {
+  margin-bottom: 0.75rem;
+}
+
+.edit-section label {
+  display: block;
+  font-size: 0.8rem;
+  color: #666;
+  margin-bottom: 0.25rem;
+}
+
 .edit-actions {
   display: flex;
   gap: 0.5rem;
@@ -1878,6 +2143,11 @@ onMounted(() => {
   overflow-y: auto;
 }
 
+.panel-content.form-content.drag-over {
+  background: #e8f4ff;
+  border: 2px dashed #4a9eff;
+}
+
 .panel-content.preview-content {
   display: flex;
   flex-direction: column;
@@ -1999,6 +2269,79 @@ onMounted(() => {
 .preview-body.drag-over {
   background: #e3f2fd;
   border: 2px dashed #3498db;
+}
+
+/* Think 内容样式 */
+.thinking-section {
+  margin-bottom: 1rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.thinking-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: #f8f9fa;
+  cursor: pointer;
+  user-select: none;
+}
+
+.thinking-header:hover {
+  background: #e9ecef;
+}
+
+.thinking-toggle {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.thinking-hint {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: #999;
+}
+
+.thinking-content {
+  padding: 1rem;
+  background: #fafafa;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.thinking-content pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: #555;
+}
+
+.generating-indicator {
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+}
+
+.generating-indicator .dot {
+  animation: blink 1.4s infinite both;
+  font-size: 2rem;
+}
+
+.generating-indicator .dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.generating-indicator .dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes blink {
+  0%, 80%, 100% { opacity: 0; }
+  40% { opacity: 1; }
 }
 
 .preview-body .vision-structured {
@@ -2176,6 +2519,57 @@ onMounted(() => {
   width: 400px;
   max-width: 90vw;
   box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+
+.prompt-editor-panel {
+  background: white;
+  border-radius: 8px;
+  width: 700px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+
+.prompt-editor-body {
+  flex: 1;
+  padding: 1rem 1.25rem;
+  overflow: auto;
+}
+
+.prompt-hint {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.prompt-hint code {
+  background: #f0f0f0;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.8rem;
+}
+
+.prompt-textarea {
+  width: 100%;
+  min-height: 300px;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.prompt-textarea:focus {
+  outline: none;
+  border-color: #4a9eff;
+  box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.2);
 }
 
 .settings-header {

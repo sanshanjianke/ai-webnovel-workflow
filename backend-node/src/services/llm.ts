@@ -17,12 +17,20 @@ export class OpenAICompatLLM implements LLMProvider {
   async invoke(prompt: string, options: LLMOptions = {}): Promise<string> {
     const url = `${this.baseUrl.replace(/\/$/, '')}/chat/completions`;
     
-    const body = {
+    const body: Record<string, unknown> = {
       model: options.model || this.model,
       messages: [{ role: 'user', content: prompt }],
       temperature: options.temperature ?? 0.7,
       max_tokens: options.maxTokens ?? 4096
     };
+
+    // 启用 think 模式
+    if (options.thinking) {
+      body.thinking = {
+        type: 'enabled',
+        budget_tokens: options.thinkingBudget || 10000
+      };
+    }
 
     const response = await fetch(url, {
       method: 'POST',
@@ -47,13 +55,21 @@ export class OpenAICompatLLM implements LLMProvider {
   async *stream(prompt: string, options: LLMOptions = {}): AsyncGenerator<LLMChunk> {
     const url = `${this.baseUrl.replace(/\/$/, '')}/chat/completions`;
     
-    const body = {
+    const body: Record<string, unknown> = {
       model: options.model || this.model,
       messages: [{ role: 'user', content: prompt }],
       temperature: options.temperature ?? 0.7,
       max_tokens: options.maxTokens ?? 4096,
       stream: true
     };
+
+    // 启用 think 模式
+    if (options.thinking) {
+      body.thinking = {
+        type: 'enabled',
+        budget_tokens: options.thinkingBudget || 10000
+      };
+    }
 
     const response = await fetch(url, {
       method: 'POST',
@@ -97,13 +113,15 @@ export class OpenAICompatLLM implements LLMProvider {
           const choices = parsed.choices as Array<Record<string, unknown>> | undefined;
           const delta = choices?.[0]?.delta as Record<string, unknown> | undefined;
           
-          if (delta?.content) {
-            yield { type: 'content', content: delta.content as string };
+          // GLM/DeepSeek 使用 reasoning_content 字段
+          const reasoning = delta?.reasoning_content;
+          if (reasoning) {
+            yield { type: 'thinking', content: reasoning as string };
           }
           
-          // 某些模型支持 thinking 字段
-          if (delta?.thinking) {
-            yield { type: 'thinking', content: delta.thinking as string };
+          const content = delta?.content;
+          if (content) {
+            yield { type: 'content', content: content as string };
           }
         } catch {
           // 忽略解析错误

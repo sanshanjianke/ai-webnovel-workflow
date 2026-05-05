@@ -129,16 +129,6 @@ export function registerMeetingRoutes(app: Express): void {
       }
     } catch {}
 
-    // 读取愿景文档
-    const visionPath = `${project.path}/outputs/l1_vision.json`;
-    let vision: Record<string, string> = {};
-    try {
-      const fs = require('fs');
-      if (fs.existsSync(visionPath)) {
-        vision = JSON.parse(fs.readFileSync(visionPath, 'utf-8'));
-      }
-    } catch {}
-
     // 创建反馈队列
     const feedbackQueue: Array<(feedback: UserFeedback | null) => void> = [];
     activeMeetings.set(meetingId, {
@@ -168,7 +158,7 @@ export function registerMeetingRoutes(app: Express): void {
 
         for await (const event of pipelineEngine.processQueue(
           files,
-          vision,
+          {},  // 不再自动导入vision，由用户通过输入源导入
           worldbookText,
           ''
         )) {
@@ -180,7 +170,7 @@ export function registerMeetingRoutes(app: Express): void {
         activeMeetings.get(meetingId)!.engine = meetingEngine;
 
         for await (const event of meetingEngine.run(
-          vision,
+          {},  // 不再自动导入vision，由用户通过输入源导入
           worldbookText,
           '',
           humanFeedback

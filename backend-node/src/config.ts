@@ -85,7 +85,15 @@ function mergeConfig(defaults: AppConfig, overrides: Record<string, unknown>): A
   const result = { ...defaults };
   
   if (overrides.llm && typeof overrides.llm === 'object') {
-    result.llm = { ...defaults.llm, ...(overrides.llm as Record<string, unknown>) } as AppConfig['llm'];
+    const llm = overrides.llm as Record<string, unknown>;
+    result.llm = {
+      ...defaults.llm,
+      apiKey: (llm.apiKey || llm.api_key || defaults.llm.apiKey) as string,
+      baseUrl: (llm.baseUrl || llm.base_url || defaults.llm.baseUrl) as string,
+      primary: (llm.primary || defaults.llm.primary) as string,
+      model: (llm.model || defaults.llm.model) as string,
+      embedding: (llm.embedding || defaults.llm.embedding) as string
+    };
   }
   if (overrides.rag && typeof overrides.rag === 'object') {
     result.rag = { ...defaults.rag, ...(overrides.rag as Record<string, unknown>) } as AppConfig['rag'];

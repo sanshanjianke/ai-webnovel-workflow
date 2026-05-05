@@ -4,7 +4,8 @@ import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { ProjectConfig, Project } from '../protocols';
 
-const DATA_DIR = path.join(__dirname, '../../data/projects');
+const PROJECT_ROOT = path.resolve(__dirname, '../..');
+const DATA_DIR = path.join(PROJECT_ROOT, '..', 'data', 'projects');
 
 export class ProjectManager {
   private dataPath: string;

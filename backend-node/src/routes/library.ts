@@ -20,8 +20,17 @@ export function registerLibraryRoutes(app: Express): void {
     try {
       const library = getLibrary(req.params.projectId);
       const includeArchived = req.query.includeArchived === 'true';
+      
+      // 返回前端期望的格式
+      const documents = library.listDocuments(undefined, undefined, includeArchived);
       const tree = library.getTree(includeArchived);
-      res.json({ tree });
+      const directories = Object.keys(tree);
+      
+      res.json({
+        documents,
+        directories,
+        active_docs: library['manifest']?.activeDocs || {}
+      });
     } catch (error) {
       res.status(500).json({ error: String(error) });
     }

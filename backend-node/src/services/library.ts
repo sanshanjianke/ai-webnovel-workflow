@@ -29,6 +29,10 @@ export class LibraryManager {
   private loadManifest(): void {
     if (fs.existsSync(this.manifestPath)) {
       this.manifest = JSON.parse(fs.readFileSync(this.manifestPath, 'utf-8'));
+      // 确保 activeDocs 存在
+      if (!this.manifest.activeDocs) {
+        this.manifest.activeDocs = {};
+      }
     } else {
       this.manifest = {
         projectId: path.basename(this.projectPath),
@@ -212,7 +216,7 @@ export class LibraryManager {
 
   setActive(layer: string, uid: string): boolean {
     const entry = this.getEntry(uid);
-    if (!entry || entry.layer !== layer) return false;
+    if (!entry) return false;
 
     this.manifest.activeDocs[layer] = uid;
     this.saveManifest();
