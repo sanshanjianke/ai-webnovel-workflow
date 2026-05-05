@@ -113,7 +113,6 @@ export class PipelineEngine {
     if (!queue) return;
 
     let emptyCount = 0;
-    const maxEmptyCount = 50; // 5秒后退出（50 * 100ms）
 
     while (!this.stopRequested) {
       // 检查队列是否有任务
@@ -122,10 +121,11 @@ export class PipelineEngine {
         
         // 检查是否所有上游都已完成
         const allUpstreamDone = node.upstream.every(upId => this.completedConsumers.has(upId));
-        const allQueuesEmpty = Array.from(this.nodeQueues.values()).every(q => q.isEmpty());
         
-        // 如果所有上游完成且队列为空，退出
-        if (allUpstreamDone && allQueuesEmpty && emptyCount > 5) {
+        // 如果所有上游完成且队列为空，再等待一段时间确保没有新任务
+        // 对于根节点（没有上游），需要等待更长时间确保下游节点收到所有任务
+        const waitThreshold = node.upstream.length === 0 ? 200 : 50;
+        if (allUpstreamDone && emptyCount > waitThreshold) {
           break;
         }
         
@@ -298,15 +298,9 @@ export class PipelineEngine {
         }
         
         // 检查是否所有任务完成
-        const allQueuesEmpty = Array.from(this.nodeQueues.values()).every(q => q.isEmpty());
         const allConsumersDone = this.completedConsumers.size >= this.nodes.size;
         
-        if (allQueuesEmpty && this.eventQueue.isEmpty() && allConsumersDone) {
-          break;
-        }
-        
-        // 超时保护：如果处理时间过长，强制退出
-        if (this.processedFiles >= this.totalFiles * this.nodes.size) {
+        if (allConsumersDone && this.eventQueue.isEmpty()) {
           break;
         }
       } catch (e) {
@@ -314,12 +308,19 @@ export class PipelineEngine {
       }
     }
 
-    // 收集输出 - 按文件分别存储
+    // 收集输出 - 只收集叶子节点（没有下游的节点）
+    const leafNodes = Array.from(this.nodes.values())
+      .filter(n => n.downstream.length === 0)
+      .map(n => n.id);
+    
     const nodeOutputs: Record<string, Record<number, string>> = {};
     for (const [key, content] of this.nodeOutputs) {
       const parts = key.split('_');
       const nodeId = parts[0];
       const fileIndex = parseInt(parts[1]) || 0;
+      
+      // 只收集叶子节点的输出
+      if (!leafNodes.includes(nodeId)) continue;
       
       if (!nodeOutputs[nodeId]) {
         nodeOutputs[nodeId] = {};
