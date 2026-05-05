@@ -258,7 +258,9 @@ onMounted(() => {
       if (!matchesTarget(data)) return
       const msgs = messages.value
       let last = msgs.length > 0 ? msgs[msgs.length - 1] : null
+      console.log('[CHUNK] last:', last ? { streaming: last.streaming, content: last.content?.slice(0, 20) } : null)
       if (!last || !last.streaming) {
+        console.log('[CHUNK] Creating new message because last is', last ? 'not streaming' : 'null')
         last = { type: 'expert', expert_type: data.expert_type || data.expertType || '', content: '', thinking: '', streaming: true,
           timestamp: timestamp || new Date().toISOString() }
         msgs.push(last)
@@ -285,12 +287,15 @@ onMounted(() => {
       }
       const msgs = messages.value
       let last = msgs.length > 0 ? msgs[msgs.length - 1] : null
+      console.log('[MESSAGE] data.type:', data.type, 'last:', last ? { streaming: last.streaming, content: last.content?.slice(0, 20) } : null)
       // 如果是 expert_speak 且有流式消息，定型之
       if (data.type === 'expert' && last && last.streaming) {
+        console.log('[MESSAGE] Updating existing streaming message')
         last.content = data.content || last.content
         last.streaming = false
         last.expert_type = data.expert_type || last.expert_type
       } else {
+        console.log('[MESSAGE] Creating new message')
         messages.value.push({ ...data, timestamp: timestamp || data.timestamp || new Date().toISOString() })
       }
       isRunning.value = data.type !== 'pipeline_complete' && data.type !== 'expert' && data.type !== 'done'
