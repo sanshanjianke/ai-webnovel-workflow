@@ -46,7 +46,7 @@ onMounted(() => {
       for (const m of msgs) {
         // 使用JSON序列化/反序列化确保数据可克隆
         const plainMsg = JSON.parse(JSON.stringify(m))
-        chatChannel.postMessage({ type: m.type, data: plainMsg, timestamp: m.timestamp })
+        chatChannel.postMessage({ type: 'message', data: plainMsg, timestamp: m.timestamp })
       }
       // 同步队列状态
       if (queueState.value.total > 0) {
@@ -55,17 +55,6 @@ onMounted(() => {
       // 如果正在运行，发送运行状态
       if (isRunning.value) {
         chatChannel.postMessage({ type: 'running_state', data: { isRunning: true } })
-      }
-      // 同步输出文件（针对输出节点）
-      if (pipelineOutput.value) {
-        const nodeOutputs = pipelineOutput.value.node_outputs || pipelineOutput.value.nodeOutputs || {}
-        if (Object.keys(nodeOutputs).length > 0) {
-          const outputFiles = Object.entries(nodeOutputs).map(([key, content]) => ({
-            name: `${key}.md`,
-            content: content
-          }))
-          chatChannel.postMessage({ type: 'output_files', data: { files: outputFiles } })
-        }
       }
     }
   }
@@ -197,18 +186,20 @@ function handleSSEEvent(type, data) {
       isRunning.value = false
       sessionStorage.removeItem('meetingRunning')
       pipelineOutput.value = data.output // 保存输出数据
-      broadcast('done', { output: data.output })
       // 向output节点发送输出文件列表
       if (data.output) {
         const nodeOutputs = data.output.node_outputs || data.output.nodeOutputs || {}
+        console.log('[PIPELINE_COMPLETE] nodeOutputs:', nodeOutputs)
         if (Object.keys(nodeOutputs).length > 0) {
           const outputFiles = Object.entries(nodeOutputs).map(([key, content]) => ({
             name: `${key}.md`,
             content: content
           }))
+          console.log('[PIPELINE_COMPLETE] Sending output_files:', outputFiles)
           broadcast('output_files', { files: outputFiles })
         }
       }
+      broadcast('done', { output: data.output })
       break
     case 'level_start':
     case 'level_complete':
