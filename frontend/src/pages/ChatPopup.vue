@@ -169,6 +169,16 @@ onMounted(() => {
 
     if (type === 'done') {
       isRunning.value = false
+      // 输出节点从done事件中提取文件
+      if (nodeType.value === 'output' && data?.output) {
+        const nodeOutputs = data.output.node_outputs || data.output.nodeOutputs || {}
+        if (Object.keys(nodeOutputs).length > 0 && outputFiles.value.length === 0) {
+          outputFiles.value = Object.entries(nodeOutputs).map(([key, content]) => ({
+            name: `${key}.md`,
+            content: content
+          }))
+        }
+      }
       const msgs = messages.value
       for (let i = msgs.length - 1; i >= 0; i--) {
         if (msgs[i].streaming) { msgs[i].streaming = false; break }
@@ -216,6 +226,7 @@ onMounted(() => {
     if (type === 'output_files') {
       // 输出节点接收文件列表
       if (nodeType.value === 'output') {
+        console.log('[CHAT] Received output_files:', data.files?.length, 'files')
         outputFiles.value = data.files || []
       }
       return
