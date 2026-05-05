@@ -1390,37 +1390,30 @@ async function transferToLibrary() {
 
   try {
     if (keys.length === 1) {
-      // 单个文件直接导入
       const content = nodeOutputs[keys[0]]
-      const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
-      const formData = new FormData()
-      formData.append('file', blob, `${keys[0]}.md`)
-      formData.append('directory', '/管道输出')
-      
-      await axios.post(`/api/projects/${props.projectId}/library/import`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+      await axios.post(`/api/projects/${props.projectId}/library/import`, {
+        name: `${keys[0]}.md`,
+        content,
+        format: 'markdown',
+        directory: '/管道输出'
       })
       alert('已转移到文档库')
     } else {
-      // 多个文件打包为zip后导入
-      const zip = new JSZip()
       for (const [nodeId, content] of Object.entries(nodeOutputs)) {
-        zip.file(`${nodeId}.md`, content)
+        await axios.post(`/api/projects/${props.projectId}/library/import`, {
+          name: `${nodeId}.md`,
+          content,
+          format: 'markdown',
+          directory: '/管道输出'
+        })
       }
-      const blob = await zip.generateAsync({ type: 'blob' })
-      
-      const formData = new FormData()
-      formData.append('file', blob, 'pipeline_output.zip')
-      formData.append('directory', '/管道输出')
-      
-      await axios.post(`/api/projects/${props.projectId}/library/import`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      })
       alert('已转移到文档库')
     }
+    // 刷新文档库侧边栏
+    window.postMessage({ type: 'library-refresh' }, window.location.origin)
   } catch (err) {
     console.error('转移到文档库失败:', err)
-    alert('转移到文档库失败: ' + (err.response?.data?.detail || err.message))
+    alert('转移到文档库失败: ' + (err.response?.data?.error || err.message))
   }
 }
 </script>

@@ -36,7 +36,10 @@
               <span class="file-name">{{ file.name }}</span>
               <button class="btn btn-sm" @click="downloadFile(file)">下载</button>
             </div>
-            <button class="btn btn-primary" @click="downloadAll">下载全部 (zip)</button>
+            <div class="output-actions">
+              <button class="btn btn-primary" @click="downloadAll">下载全部 (zip)</button>
+              <button class="btn btn-secondary" @click="transferToLibrary">导入文档库</button>
+            </div>
           </div>
           <div v-else class="empty-hint">
             等待输出...
@@ -92,6 +95,9 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import DocumentSidebar from '../components/library/DocumentSidebar.vue'
+import JSZip from 'jszip'
+import { saveAs } from 'file-saver'
+import axios from 'axios'
 
 const route = useRoute()
 const md = new MarkdownIt()
@@ -143,9 +149,40 @@ function downloadFile(file) {
   a.click()
   URL.revokeObjectURL(url)
 }
-function downloadAll() {
-  // TODO: 实现zip打包下载
-  alert('zip下载功能待实现')
+async function downloadAll() {
+  if (outputFiles.value.length === 0) return
+
+  const zip = new JSZip()
+  for (const file of outputFiles.value) {
+    zip.file(file.name, file.content)
+  }
+  const blob = await zip.generateAsync({ type: 'blob' })
+  saveAs(blob, 'output.zip')
+}
+
+async function transferToLibrary() {
+  if (outputFiles.value.length === 0) return
+  if (!projectId.value) {
+    alert('未关联项目，无法导入文档库')
+    return
+  }
+
+  try {
+    for (const file of outputFiles.value) {
+      await axios.post(`/api/projects/${projectId.value}/library/import`, {
+        name: file.name,
+        content: file.content,
+        format: 'markdown',
+        directory: '/管道输出'
+      })
+    }
+    // 刷新文档库侧边栏
+    window.postMessage({ type: 'library-refresh' }, window.location.origin)
+    alert('已导入文档库')
+  } catch (err) {
+    console.error('导入文档库失败:', err)
+    alert('导入文档库失败: ' + (err.response?.data?.error || err.message))
+  }
 }
 
 function matchesTarget(data) {
@@ -426,6 +463,7 @@ onUnmounted(() => {
 .file-icon { font-size: 1.2rem; }
 .file-name { flex: 1; font-weight: 500; }
 .file-size { color: #999; font-size: 0.75rem; }
+.output-actions { display: flex; gap: 8px; margin-top: 4px; }
 
 /* 按钮 */
 .btn { 
