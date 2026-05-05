@@ -2,45 +2,85 @@
   <div class="chat-popup">
     <div class="popup-header">
       <h2>{{ title }}</h2>
+      <span class="popup-type-badge">{{ nodeTypeLabel }}</span>
       <span class="popup-status" v-if="isRunning">● 运行中</span>
       <span class="popup-status stopped" v-else>已完成</span>
     </div>
     <div class="popup-body">
       <DocumentSidebar v-if="projectId" :projectId="projectId" class="popup-library" />
-      <div class="popup-messages" ref="msgEl">
-        <div v-if="messages.length === 0" class="empty-hint">
-          等待消息...<br><small>在编排画布上运行管道后，消息将在此显示</small>
+      
+      <!-- 输入源节点 -->
+      <div v-if="nodeType === 'inputSource'" class="popup-content">
+        <div class="input-source-panel">
+          <h3>📥 输入源</h3>
+          <div class="input-files-list">
+            <div v-for="(file, idx) in inputFiles" :key="idx" class="input-file-item">
+              <span class="file-icon">📄</span>
+              <span class="file-name">{{ file.name }}</span>
+              <span class="file-size">{{ formatSize(file.size) }}</span>
+            </div>
+            <div v-if="inputFiles.length === 0" class="empty-hint">
+              暂无输入文件
+            </div>
+          </div>
         </div>
-      <div v-for="(msg, idx) in messages" :key="idx"
-        :class="['message', msg.type]">
-        <div class="message-header">
-          <span class="expert-icon">{{ getIcon(msg) }}</span>
-          <span class="expert-name">{{ msg.expert_type || msg.type }}</span>
-          <span class="timestamp">{{ formatTime(msg.timestamp) }}</span>
-        </div>
-        <details v-if="msg.thinking" class="thinking-block" :open="msg.streaming">
-          <summary>💭 思考过程 <span v-if="msg.streaming" class="thinking-indicator">...</span></summary>
-          <pre class="thinking-text">{{ msg.thinking }}</pre>
-        </details>
-        <div class="message-content" v-html="renderMarkdown(msg.content)"></div>
-        <span v-if="msg.streaming" class="streaming-cursor">▊</span>
       </div>
-    </div>
-      <div class="queue-sidebar" v-if="queueState.total > 0">
-        <div class="queue-sidebar-header">
-          📥 队列 
-          <span v-if="remainingFiles > 0" class="queue-count">{{ remainingFiles }}</span>
-          <span v-else class="queue-done">✓</span>
+      
+      <!-- 输出节点 -->
+      <div v-else-if="nodeType === 'output'" class="popup-content">
+        <div class="output-panel">
+          <h3>📤 输出结果</h3>
+          <div v-if="outputFiles.length > 0" class="output-files-list">
+            <div v-for="(file, idx) in outputFiles" :key="idx" class="output-file-item">
+              <span class="file-icon">📄</span>
+              <span class="file-name">{{ file.name }}</span>
+              <button class="btn btn-sm" @click="downloadFile(file)">下载</button>
+            </div>
+            <button class="btn btn-primary" @click="downloadAll">下载全部 (zip)</button>
+          </div>
+          <div v-else class="empty-hint">
+            等待输出...
+          </div>
         </div>
-        <div v-for="(file, idx) in pendingFiles" :key="idx"
-          :class="['queue-sidebar-item', {
-            current: idx === 0
-          }]">
-          <span class="queue-dot"></span>
-          <span>{{ file }}</span>
+      </div>
+      
+      <!-- 专家和容器节点 -->
+      <div v-else class="popup-messages-container">
+        <div class="popup-messages" ref="msgEl">
+          <div v-if="messages.length === 0" class="empty-hint">
+            等待消息...<br><small>在编排画布上运行管道后，消息将在此显示</small>
+          </div>
+          <div v-for="(msg, idx) in messages" :key="idx"
+            :class="['message', msg.type]">
+            <div class="message-header">
+              <span class="expert-icon">{{ getIcon(msg) }}</span>
+              <span class="expert-name">{{ msg.expert_type || msg.type }}</span>
+              <span class="timestamp">{{ formatTime(msg.timestamp) }}</span>
+            </div>
+            <details v-if="msg.thinking" class="thinking-block" :open="msg.streaming">
+              <summary>💭 思考过程 <span v-if="msg.streaming" class="thinking-indicator">...</span></summary>
+              <pre class="thinking-text">{{ msg.thinking }}</pre>
+            </details>
+            <div class="message-content" v-html="renderMarkdown(msg.content)"></div>
+            <span v-if="msg.streaming" class="streaming-cursor">▊</span>
+          </div>
         </div>
-        <div v-if="pendingFiles.length === 0" class="queue-complete-hint">
-          全部完成
+        <div class="queue-sidebar" v-if="queueState.total > 0">
+          <div class="queue-sidebar-header">
+            📥 队列 
+            <span v-if="remainingFiles > 0" class="queue-count">{{ remainingFiles }}</span>
+            <span v-else class="queue-done">✓</span>
+          </div>
+          <div v-for="(file, idx) in pendingFiles" :key="idx"
+            :class="['queue-sidebar-item', {
+              current: idx === 0
+            }]">
+            <span class="queue-dot"></span>
+            <span>{{ file }}</span>
+          </div>
+          <div v-if="pendingFiles.length === 0" class="queue-complete-hint">
+            全部完成
+          </div>
         </div>
       </div>
     </div>
@@ -57,11 +97,18 @@ const route = useRoute()
 const md = new MarkdownIt()
 const targetId = computed(() => route.query.containerId || route.query.expertId || 'solo')
 const projectId = computed(() => route.query.projectId || '')
+const nodeType = computed(() => route.query.nodeType || 'expert') // expert, container, inputSource, output
 const title = computed(() => route.query.name || (targetId.value === 'solo' ? '主聊天' : targetId.value))
+const nodeTypeLabel = computed(() => {
+  const labels = { expert: '专家', container: '容器', inputSource: '输入源', output: '输出' }
+  return labels[nodeType.value] || '节点'
+})
 const messages = ref([])
 const isRunning = ref(true)
 const msgEl = ref(null)
 const queueState = ref({ total: 0, files: [] })
+const inputFiles = ref([]) // 输入源文件列表
+const outputFiles = ref([]) // 输出文件列表
 let channel = null
 
 // 计算剩余文件数
@@ -80,6 +127,26 @@ function getIcon(msg) {
 }
 function renderMarkdown(text) { return text ? md.render(text) : '' }
 function formatTime(ts) { return ts ? new Date(ts).toLocaleTimeString('zh-CN') : '' }
+function formatSize(bytes) {
+  if (!bytes) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let i = 0
+  while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++ }
+  return `${bytes.toFixed(1)} ${units[i]}`
+}
+function downloadFile(file) {
+  const blob = new Blob([file.content], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = file.name
+  a.click()
+  URL.revokeObjectURL(url)
+}
+function downloadAll() {
+  // TODO: 实现zip打包下载
+  alert('zip下载功能待实现')
+}
 
 function matchesTarget(data) {
   if (!data) {
@@ -146,6 +213,14 @@ onMounted(() => {
       return
     }
 
+    if (type === 'output_files') {
+      // 输出节点接收文件列表
+      if (nodeType.value === 'output') {
+        outputFiles.value = data.files || []
+      }
+      return
+    }
+
     if (type === 'expert_start') {
       if (!matchesTarget(data)) return
       // 添加文件到队列
@@ -153,6 +228,10 @@ onMounted(() => {
         const fileName = `文件${data.fileIndex + 1}`
         if (!queueState.value.files.includes(fileName)) {
           queueState.value.files.push(fileName)
+        }
+        // 更新total
+        if (data.fileTotal && data.fileTotal > queueState.value.total) {
+          queueState.value.total = data.fileTotal
         }
       }
       messages.value.push({
@@ -274,4 +353,81 @@ onUnmounted(() => {
 .streaming-cursor { display: inline; animation: blink 0.8s infinite; color: #3498db; font-weight: bold; }
 .empty-hint { text-align: center; color: #999; padding: 3rem 1rem; font-size: 0.9rem; line-height: 1.8; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+/* 节点类型徽章 */
+.popup-type-badge { 
+  font-size: 0.7rem; 
+  padding: 2px 8px; 
+  border-radius: 10px; 
+  background: #e0e0e0; 
+  color: #666; 
+}
+
+/* 输入源和输出节点的内容区域 */
+.popup-content { 
+  flex: 1; 
+  overflow-y: auto; 
+  padding: 1rem; 
+}
+
+/* 专家和容器节点的消息容器 */
+.popup-messages-container { 
+  flex: 1; 
+  display: flex; 
+  overflow: hidden; 
+}
+
+/* 输入源面板 */
+.input-source-panel, .output-panel { 
+  background: white; 
+  border-radius: 8px; 
+  padding: 1.5rem; 
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+}
+.input-source-panel h3, .output-panel h3 { 
+  margin: 0 0 1rem 0; 
+  font-size: 1rem; 
+  color: #333; 
+  border-bottom: 1px solid #eee; 
+  padding-bottom: 0.5rem; 
+}
+
+/* 文件列表 */
+.input-files-list, .output-files-list { 
+  display: flex; 
+  flex-direction: column; 
+  gap: 8px; 
+}
+.input-file-item, .output-file-item { 
+  display: flex; 
+  align-items: center; 
+  gap: 8px; 
+  padding: 8px 12px; 
+  background: #f8f9fa; 
+  border-radius: 6px; 
+  font-size: 0.85rem; 
+}
+.file-icon { font-size: 1.2rem; }
+.file-name { flex: 1; font-weight: 500; }
+.file-size { color: #999; font-size: 0.75rem; }
+
+/* 按钮 */
+.btn { 
+  padding: 4px 12px; 
+  border: 1px solid #ddd; 
+  border-radius: 4px; 
+  cursor: pointer; 
+  font-size: 0.8rem; 
+  background: white; 
+  transition: all 0.2s; 
+}
+.btn:hover { background: #f0f0f0; }
+.btn-primary { 
+  background: #3498db; 
+  color: white; 
+  border-color: #3498db; 
+  margin-top: 12px; 
+}
+.btn-primary:hover { background: #2980b9; }
+.btn-sm { padding: 2px 8px; font-size: 0.75rem; }
 </style>

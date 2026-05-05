@@ -187,17 +187,15 @@ function handleSSEEvent(type, data) {
       sessionStorage.removeItem('meetingRunning')
       pipelineOutput.value = data.output // 保存输出数据
       broadcast('done', { output: data.output })
-      // 向output节点发送最终结果（支持驼峰和下划线）
+      // 向output节点发送输出文件列表
       if (data.output) {
-        const summary = data.output.meeting_summary || data.output.meetingSummary
-        if (summary) {
-          broadcast('message', {
-            type: 'expert',
-            expert_type: '输出结果',
-            expert_id: 'output',
-            content: summary,
-            timestamp: new Date().toISOString()
-          })
+        const nodeOutputs = data.output.node_outputs || data.output.nodeOutputs || {}
+        if (Object.keys(nodeOutputs).length > 0) {
+          const outputFiles = Object.entries(nodeOutputs).map(([key, content]) => ({
+            name: `${key}.md`,
+            content: content
+          }))
+          broadcast('output_files', { files: outputFiles })
         }
       }
       break

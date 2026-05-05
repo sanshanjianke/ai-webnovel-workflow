@@ -254,7 +254,7 @@ export class PipelineEngine {
       consumerPromises.push(promise);
     }
 
-    // 发送队列初始化事件
+    // 只为根节点发送队列初始化事件
     for (const rootNode of rootNodes) {
       const fileNames = files.map((_, i) => `文件${i + 1}`);
       yield {

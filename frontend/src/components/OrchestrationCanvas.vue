@@ -1253,7 +1253,7 @@ function onNodeDoubleClick({ node }) {
 }
 
 function openNodeChatTab(node) {
-  let params = `projectId=${encodeURIComponent(props.projectId || '')}`
+  let params = `projectId=${encodeURIComponent(props.projectId || '')}&nodeType=${encodeURIComponent(node.type)}`
   if (node.type === 'container') {
     params += `&containerId=${encodeURIComponent(node.id)}&name=${encodeURIComponent(node.data.name || '容器')}`
   } else if (node.type === 'expert') {
@@ -1261,8 +1261,10 @@ function openNodeChatTab(node) {
     const label = getExpertLabel(eid) || eid
     params += `&expertId=${encodeURIComponent(eid)}&name=${encodeURIComponent(label)}`
     if (node.parentNode) params += `&containerId=${encodeURIComponent(node.parentNode)}`
+  } else if (node.type === 'inputSource') {
+    params += `&name=${encodeURIComponent(node.data.label || '输入源')}`
   } else if (node.type === 'output') {
-    params += `&expertId=output&name=${encodeURIComponent(node.data.label || '输出')}`
+    params += `&name=${encodeURIComponent(node.data.label || '输出')}`
   }
   window.open(`/chat-popup?${params}`, '_blank')
 }
