@@ -38,7 +38,7 @@ export class PipelineEngine {
   private state: 'idle' | 'running' | 'completed' | 'stopped' = 'idle';
   private stopRequested: boolean = false;
   private eventQueue: AsyncQueue<PipelineEvent> = new AsyncQueue();
-  private nodeOutputs: Map<string, string> = new Map();
+  private nodeOutputs: Map<string, Map<number, string>> = new Map();
   private completedConsumers: Set<string> = new Set();
   private totalFiles: number = 0;
   private processedFiles: number = 0;
@@ -200,7 +200,10 @@ export class PipelineEngine {
       }
 
       // 保存节点输出
-      this.nodeOutputs.set(`${nodeId}_${task.index}`, fullContent);
+      if (!this.nodeOutputs.has(nodeId)) {
+        this.nodeOutputs.set(nodeId, new Map());
+      }
+      this.nodeOutputs.get(nodeId)!.set(task.index, fullContent);
 
       // 把产出传递给下游节点
       for (const downstreamId of node.downstream) {
@@ -312,20 +315,16 @@ export class PipelineEngine {
     const leafNodes = Array.from(this.nodes.values())
       .filter(n => n.downstream.length === 0)
       .map(n => n.id);
-    
+
     const nodeOutputs: Record<string, Record<number, string>> = {};
-    for (const [key, content] of this.nodeOutputs) {
-      const parts = key.split('_');
-      const nodeId = parts[0];
-      const fileIndex = parseInt(parts[1]) || 0;
-      
+    for (const [nodeId, fileMap] of this.nodeOutputs) {
       // 只收集叶子节点的输出
       if (!leafNodes.includes(nodeId)) continue;
-      
-      if (!nodeOutputs[nodeId]) {
-        nodeOutputs[nodeId] = {};
+
+      nodeOutputs[nodeId] = {};
+      for (const [fileIndex, content] of fileMap) {
+        nodeOutputs[nodeId][fileIndex] = content;
       }
-      nodeOutputs[nodeId][fileIndex] = content;
     }
 
     // 生成摘要 - 每个节点的每个文件单独显示

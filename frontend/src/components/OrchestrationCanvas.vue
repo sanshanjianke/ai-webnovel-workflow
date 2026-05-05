@@ -1177,6 +1177,33 @@ watch(() => props.isRunning, (running) => {
   })
 })
 
+// 监听pipelineOutput变化，将文件数据传递给输出节点
+watch(() => props.pipelineOutput, (output) => {
+  if (!output) return
+
+  const nodeOutputs = output.node_outputs || output.nodeOutputs
+  if (!nodeOutputs || Object.keys(nodeOutputs).length === 0) return
+
+  // 查找输出节点
+  const outputNodes = nodes.value.filter(n => n.type === 'output')
+  if (outputNodes.length === 0) return
+
+  // 将输出文件组织为数组格式
+  const files = Object.entries(nodeOutputs).map(([key, content]) => ({
+    name: `${key}.md`,
+    content: content
+  }))
+
+  // 将文件设置到输出节点的data中
+  outputNodes.forEach(n => {
+    n.data.files = files
+    n.data.done = true
+    n.data.running = false
+  })
+
+  console.log('[OrchestrationCanvas] Files set to output nodes:', files)
+}, { immediate: true, deep: true })
+
 // ── 占位节点 ──
 
 function addPlaceholder(type) {
