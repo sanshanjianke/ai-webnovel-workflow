@@ -170,19 +170,20 @@ export class PipelineEngine {
       let fullContent = '';
 
       for await (const chunk of expert.speakStream(context)) {
-        if (chunk.type === '__done__') {
-          this.eventQueue.enqueue({
-            type: 'expert_speak',
-            data: {
-              expertId: node.expertId,
-              expertType: expert.expertType,
-              role: node.role,
-              content: fullContent,
-              nodeId,
-              fileIndex: task.index,
-              speechCount: this.totalSpeeches
-            }
-          });
+          if (chunk.type === '__done__') {
+            this.eventQueue.enqueue({
+              type: 'expert_speak',
+              data: {
+                type: 'expert',
+                expertId: node.expertId,
+                expertType: expert.expertType,
+                role: node.role,
+                content: fullContent,
+                nodeId,
+                fileIndex: task.index,
+                speechCount: this.totalSpeeches
+              }
+            });
         } else {
           fullContent += chunk.content || '';
           this.eventQueue.enqueue({

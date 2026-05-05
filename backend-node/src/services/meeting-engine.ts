@@ -267,6 +267,7 @@ export class MeetingEngine {
           yield {
             type: 'expert_speak',
             data: {
+              type: 'expert',
               expertId: opinion.expertId,
               expertType: opinion.expertType,
               role: opinion.role,
