@@ -1,4 +1,4 @@
-// 流水线引擎 - 实现真正的生产者-消费者模式
+// 流水线引擎 - 真正的生产者-消费者模式
 import { 
   MeetingConfig, ExpertConfig, ContainerConfig, 
   ExpertOpinion, ExpertRole, Granularity,
@@ -21,7 +21,8 @@ interface FileTask {
   index: number;
   total: number;
   content: Record<string, string>;
-  nodeOutputs: Map<string, string>;
+  upstreamOutputs?: Record<string, string>;
+  isLastFile?: boolean;
 }
 
 export interface PipelineEvent {
@@ -36,6 +37,11 @@ export class PipelineEngine {
   private totalSpeeches: number = 0;
   private state: 'idle' | 'running' | 'completed' | 'stopped' = 'idle';
   private stopRequested: boolean = false;
+  private eventQueue: AsyncQueue<PipelineEvent> = new AsyncQueue();
+  private nodeOutputs: Map<string, string> = new Map();
+  private completedConsumers: Set<string> = new Set();
+  private totalFiles: number = 0;
+  private processedFiles: number = 0;
 
   constructor(config: MeetingConfig) {
     this.config = config;
@@ -43,7 +49,6 @@ export class PipelineEngine {
   }
 
   private buildGraph(): void {
-    // 构建节点图
     for (const ec of this.config.experts) {
       const nodeId = ec.nodeId || ec.expertId;
       const key = ec.containerId || nodeId;
@@ -60,7 +65,6 @@ export class PipelineEngine {
       }
     }
 
-    // 构建边
     for (const edge of this.config.edges || []) {
       const source = this.findNodeKey(edge.source);
       const target = this.findNodeKey(edge.target);
@@ -80,22 +84,18 @@ export class PipelineEngine {
       }
     }
 
-    // 为每个节点创建队列
     for (const nodeId of this.nodes.keys()) {
       this.nodeQueues.set(nodeId, new AsyncQueue<FileTask>());
     }
   }
 
   private findNodeKey(vueId: string): string | null {
-    // 先直接查找
     if (this.nodes.has(vueId)) return vueId;
     
-    // 查找 containerId 匹配
     for (const [key, node] of this.nodes) {
       if (node.containerId === vueId) return key;
     }
     
-    // 查找 expertId 匹配
     for (const ec of this.config.experts) {
       if (ec.nodeId === vueId || ec.expertId === vueId) {
         return ec.containerId || ec.nodeId || ec.expertId;
@@ -105,183 +105,124 @@ export class PipelineEngine {
     return null;
   }
 
-  private getTopologicalOrder(): string[][] {
-    const inDegree = new Map<string, number>();
-    const outEdges = new Map<string, string[]>();
+  private async processNodeConsumer(nodeId: string): Promise<void> {
+    const node = this.nodes.get(nodeId);
+    if (!node) return;
 
-    // 初始化
-    for (const nodeId of this.nodes.keys()) {
-      inDegree.set(nodeId, 0);
-      outEdges.set(nodeId, []);
-    }
+    const queue = this.nodeQueues.get(nodeId);
+    if (!queue) return;
 
-    // 计算入度和出边
-    for (const node of this.nodes.values()) {
-      for (const downstream of node.downstream) {
-        inDegree.set(downstream, (inDegree.get(downstream) || 0) + 1);
-        outEdges.get(node.id)?.push(downstream);
-      }
-    }
+    let emptyCount = 0;
+    const maxEmptyCount = 50; // 5秒后退出（50 * 100ms）
 
-    // 拓扑排序（层级分组）
-    const levels: string[][] = [];
-    let queue = Array.from(this.nodes.keys()).filter(id => (inDegree.get(id) || 0) === 0);
-
-    while (queue.length > 0) {
-      levels.push([...queue]);
-      
-      const nextQueue: string[] = [];
-      for (const nodeId of queue) {
-        for (const downstream of outEdges.get(nodeId) || []) {
-          const newDegree = (inDegree.get(downstream) || 1) - 1;
-          inDegree.set(downstream, newDegree);
-          if (newDegree === 0) {
-            nextQueue.push(downstream);
-          }
-        }
-      }
-      queue = nextQueue;
-    }
-
-    return levels;
-  }
-
-  // 主运行方法 - 处理单个文件
-  async *processFile(
-    fileTask: FileTask,
-    contextInput: Record<string, string>,
-    worldbookText: string = '',
-    ragContext: string = ''
-  ): AsyncGenerator<PipelineEvent> {
-    const levels = this.getTopologicalOrder();
-    
-    yield {
-      type: 'level_start',
-      data: {
-        level: 1,
-        totalLevels: levels.length,
-        nodes: levels[0] || [],
-        fileIndex: fileTask.index
-      }
-    };
-
-    for (let levelIdx = 0; levelIdx < levels.length; levelIdx++) {
-      const level = levels[levelIdx];
-      
-      yield {
-        type: 'level_start',
-        data: {
-          level: levelIdx + 1,
-          totalLevels: levels.length,
-          nodes: level,
-          fileIndex: fileTask.index
-        }
-      };
-
-      // 并行处理同一层级的节点
-      const levelPromises = level.map(async (nodeId) => {
-        const node = this.nodes.get(nodeId);
-        if (!node) return;
-
-        // 收集上游输出
-        const upstreamOutputs: string[] = [];
-        for (const upstreamId of node.upstream) {
-          const upstreamOutput = fileTask.nodeOutputs.get(upstreamId);
-          if (upstreamOutput) {
-            upstreamOutputs.push(upstreamOutput);
-          }
-        }
-
-        // 构建上下文
-        const context: ExpertContext = {
-          vision: contextInput,
-          worldbook: worldbookText,
-          rag: ragContext,
-          history: [],
-          customPrompt: upstreamOutputs.length > 0 
-            ? `上游节点产出：\n${upstreamOutputs.join('\n\n---\n\n')}`
-            : undefined
-        };
-
-        // 判断是容器还是单独专家
-        const container = this.config.containers?.find(c => c.containerId === nodeId);
+    while (!this.stopRequested) {
+      // 检查队列是否有任务
+      if (queue.isEmpty()) {
+        emptyCount++;
         
-        if (container) {
-          // 容器处理
-          return this.processContainer(container, context, fileTask, nodeId);
-        } else {
-          // 单独专家处理
-          return this.processSingleExpert(node, context, fileTask, nodeId);
+        // 检查是否所有上游都已完成
+        const allUpstreamDone = node.upstream.every(upId => this.completedConsumers.has(upId));
+        const allQueuesEmpty = Array.from(this.nodeQueues.values()).every(q => q.isEmpty());
+        
+        // 如果所有上游完成且队列为空，退出
+        if (allUpstreamDone && allQueuesEmpty && emptyCount > 5) {
+          break;
         }
-      });
-
-      // 等待当前层级所有节点完成
-      const results = await Promise.all(levelPromises);
-      
-      // 收集输出
-      for (const result of results) {
-        if (result) {
-          fileTask.nodeOutputs.set(result.nodeId, result.content);
-        }
+        
+        // 等待一下再检查
+        await new Promise(resolve => setTimeout(resolve, 100));
+        continue;
       }
 
-      yield {
-        type: 'level_complete',
-        data: {
-          level: levelIdx + 1,
-          fileIndex: fileTask.index
-        }
-      };
-    }
-  }
+      emptyCount = 0;
+      const task = queue.dequeueSync();
+      if (!task) {
+        continue;
+      }
 
-  private async processContainer(
-    container: ContainerConfig,
-    context: ExpertContext,
-    fileTask: FileTask,
-    nodeId: string
-  ): Promise<{ nodeId: string; content: string }> {
-    const outputParts: string[] = [];
-    const children = container.children || [];
-
-    for (const childId of children) {
-      const expertConfig = this.config.experts.find(ec => 
-        (ec.containerId || ec.nodeId || ec.expertId) === childId
-      );
-      
-      if (!expertConfig) continue;
-
-      const expert = createExpert(expertConfig.expertId, expertConfig.role, this.config.granularity);
       this.totalSpeeches++;
 
-      const opinion = await expert.speak(context);
-      outputParts.push(`### ${expert.expertType}\n${opinion.content}`);
+      const expertStartEvent = {
+        type: 'expert_start',
+        data: {
+          expertId: node.expertId,
+          expertType: createExpert(node.expertId, node.role, this.config.granularity).expertType,
+          role: node.role,
+          nodeId,
+          fileIndex: task.index,
+          fileTotal: task.total,
+          speechCount: this.totalSpeeches
+        }
+      };
+      this.eventQueue.enqueue(expertStartEvent);
+
+      const context: ExpertContext = {
+        vision: task.content,
+        worldbook: '',
+        rag: '',
+        history: [],
+        customPrompt: task.upstreamOutputs 
+          ? `上游节点产出：\n${Object.entries(task.upstreamOutputs).map(([k, v]) => `### ${k}\n${v}`).join('\n\n---\n\n')}`
+          : undefined
+      };
+
+      const expert = createExpert(node.expertId, node.role, this.config.granularity);
+      let fullContent = '';
+
+      for await (const chunk of expert.speakStream(context)) {
+        if (chunk.type === '__done__') {
+          this.eventQueue.enqueue({
+            type: 'expert_speak',
+            data: {
+              expertId: node.expertId,
+              expertType: expert.expertType,
+              role: node.role,
+              content: fullContent,
+              nodeId,
+              fileIndex: task.index,
+              speechCount: this.totalSpeeches
+            }
+          });
+        } else {
+          fullContent += chunk.content || '';
+          this.eventQueue.enqueue({
+            type: 'expert_chunk',
+            data: {
+              chunkType: chunk.type,
+              content: chunk.content,
+              expertId: node.expertId,
+              nodeId,
+              fileIndex: task.index
+            }
+          });
+        }
+      }
+
+      // 保存节点输出
+      this.nodeOutputs.set(`${nodeId}_${task.index}`, fullContent);
+
+      // 把产出传递给下游节点
+      for (const downstreamId of node.downstream) {
+        const downstreamQueue = this.nodeQueues.get(downstreamId);
+        if (downstreamQueue) {
+          await downstreamQueue.enqueue({
+            index: task.index,
+            total: task.total,
+            content: task.content,
+            upstreamOutputs: {
+              ...task.upstreamOutputs,
+              [nodeId]: fullContent
+            }
+          });
+        }
+      }
+
+      this.processedFiles++;
     }
 
-    return {
-      nodeId,
-      content: outputParts.join('\n\n')
-    };
+    this.completedConsumers.add(nodeId);
   }
 
-  private async processSingleExpert(
-    node: PipelineNode,
-    context: ExpertContext,
-    fileTask: FileTask,
-    nodeId: string
-  ): Promise<{ nodeId: string; content: string }> {
-    const expert = createExpert(node.expertId, node.role, this.config.granularity);
-    this.totalSpeeches++;
-
-    const opinion = await expert.speak(context);
-    
-    return {
-      nodeId,
-      content: opinion.content
-    };
-  }
-
-  // 处理文件队列
   async *processQueue(
     files: Array<{ index: number; content: Record<string, string> }>,
     contextInput: Record<string, string>,
@@ -290,62 +231,119 @@ export class PipelineEngine {
   ): AsyncGenerator<PipelineEvent> {
     this.state = 'running';
     this.totalSpeeches = 0;
+    this.stopRequested = false;
+    this.nodeOutputs.clear();
+    this.completedConsumers.clear();
+    this.totalFiles = files.length;
+    this.processedFiles = 0;
 
-    yield {
-      type: 'queue_start',
-      data: { total: files.length }
-    };
+    const rootNodes = Array.from(this.nodes.values()).filter(n => n.upstream.length === 0);
+    
+    if (rootNodes.length === 0) {
+      yield {
+        type: 'error',
+        data: { message: '没有找到根节点' }
+      };
+      return;
+    }
 
-    const allOutputs: Map<string, string>[] = [];
+    // 启动所有节点的消费者（不等待完成）
+    const consumerPromises: Promise<void>[] = [];
+    for (const nodeId of this.nodes.keys()) {
+      const promise = this.processNodeConsumer(nodeId);
+      consumerPromises.push(promise);
+    }
 
+    // 发送队列初始化事件
+    for (const rootNode of rootNodes) {
+      const fileNames = files.map((_, i) => `文件${i + 1}`);
+      yield {
+        type: 'queue_init',
+        data: { 
+          nodeId: rootNode.id,
+          expertId: rootNode.expertId,
+          total: files.length, 
+          fileNames: fileNames
+        }
+      };
+    }
+
+    // 把文件分发到根节点
     for (const file of files) {
-      if (this.stopRequested) {
-        yield {
-          type: 'pipeline_stopped',
-          data: { reason: 'user_stopped' }
-        };
+      if (this.stopRequested) break;
+
+      for (const rootNode of rootNodes) {
+        const queue = this.nodeQueues.get(rootNode.id);
+        if (queue) {
+          await queue.enqueue({
+            index: file.index,
+            total: files.length,
+            content: file.content
+          });
+        }
+      }
+    }
+
+    // 消费事件队列
+    while (!this.stopRequested) {
+      try {
+        const event = await Promise.race([
+          this.eventQueue.dequeue(),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 500))
+        ]);
+        
+        if (event) {
+          yield event;
+        }
+        
+        // 检查是否所有任务完成
+        const allQueuesEmpty = Array.from(this.nodeQueues.values()).every(q => q.isEmpty());
+        const allConsumersDone = this.completedConsumers.size >= this.nodes.size;
+        
+        if (allQueuesEmpty && this.eventQueue.isEmpty() && allConsumersDone) {
+          break;
+        }
+        
+        // 超时保护：如果处理时间过长，强制退出
+        if (this.processedFiles >= this.totalFiles * this.nodes.size) {
+          break;
+        }
+      } catch (e) {
         break;
       }
-
-      yield {
-        type: 'queue_item_start',
-        data: { index: file.index, total: files.length }
-      };
-
-      const fileTask: FileTask = {
-        index: file.index,
-        total: files.length,
-        content: file.content,
-        nodeOutputs: new Map()
-      };
-
-      // 处理单个文件
-      for await (const event of this.processFile(fileTask, contextInput, worldbookText, ragContext)) {
-        yield event;
-      }
-
-      allOutputs.push(fileTask.nodeOutputs);
-
-      yield {
-        type: 'queue_item_complete',
-        data: { index: file.index, total: files.length }
-      };
     }
 
-    // 汇总输出
-    const nodeOutputs: Record<string, string> = {};
-    for (const outputs of allOutputs) {
-      for (const [nodeId, content] of outputs) {
-        if (!nodeOutputs[nodeId]) {
-          nodeOutputs[nodeId] = '';
-        }
-        nodeOutputs[nodeId] += '\n\n' + content;
+    // 收集输出 - 按文件分别存储
+    const nodeOutputs: Record<string, Record<number, string>> = {};
+    for (const [key, content] of this.nodeOutputs) {
+      const parts = key.split('_');
+      const nodeId = parts[0];
+      const fileIndex = parseInt(parts[1]) || 0;
+      
+      if (!nodeOutputs[nodeId]) {
+        nodeOutputs[nodeId] = {};
       }
+      nodeOutputs[nodeId][fileIndex] = content;
     }
 
+    // 生成摘要 - 每个节点的每个文件单独显示
     const meetingSummary = Object.entries(nodeOutputs)
-      .map(([nodeId, content]) => `## ${nodeId}\n${content}`)
+      .map(([nodeId, files]) => {
+        const fileEntries = Object.entries(files)
+          .sort(([a], [b]) => parseInt(a) - parseInt(b))
+          .map(([idx, content]) => `### 文件${parseInt(idx) + 1}\n${content}`)
+          .join('\n\n');
+        return `## ${nodeId}\n${fileEntries}`;
+      })
       .join('\n\n---\n\n');
+
+    // 为了兼容下载功能，将输出格式转换为按节点-文件索引存储
+    const flatOutputs: Record<string, string> = {};
+    for (const [nodeId, files] of Object.entries(nodeOutputs)) {
+      for (const [idx, content] of Object.entries(files)) {
+        flatOutputs[`${nodeId}_file${parseInt(idx) + 1}`] = content;
+      }
+    }
 
     this.state = 'completed';
 
@@ -358,7 +356,7 @@ export class PipelineEngine {
       type: 'pipeline_complete',
       data: {
         output: {
-          nodeOutputs,
+          nodeOutputs: flatOutputs,
           totalSpeeches: this.totalSpeeches,
           meetingSummary
         }
@@ -369,6 +367,11 @@ export class PipelineEngine {
   stop(): void {
     this.stopRequested = true;
     this.state = 'stopped';
+    
+    for (const queue of this.nodeQueues.values()) {
+      queue.clear();
+    }
+    this.eventQueue.clear();
   }
 
   getState(): string {

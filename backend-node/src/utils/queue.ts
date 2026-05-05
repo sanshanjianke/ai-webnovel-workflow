@@ -78,6 +78,17 @@ export class AsyncQueue<T> {
     return this.closed;
   }
 
+  clear(): void {
+    this.items = [];
+  }
+
+  dequeueSync(): T | undefined {
+    if (this.items.length > 0) {
+      return this.items.shift();
+    }
+    return undefined;
+  }
+
   // 实现异步迭代器接口
   [Symbol.asyncIterator](): AsyncIterator<T> {
     return {

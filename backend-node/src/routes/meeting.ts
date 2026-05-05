@@ -64,40 +64,46 @@ export function registerMeetingRoutes(app: Express): void {
 
     const {
       meetingName = '专家会议',
+      meeting_name: meetingNameAlt,
       experts = [],
       containers = [],
       edges = [],
       pipeline = false,
-      queueFiles = []
+      queueFiles = [],
+      queue_files: queueFilesAlt = []
     } = req.body;
+
+    // 支持两种字段名
+    const finalMeetingName = meetingName || meetingNameAlt || '专家会议';
+    const finalQueueFiles = queueFiles.length > 0 ? queueFiles : queueFilesAlt;
 
     // 构建会议配置
     const config: MeetingConfig = {
-      meetingName,
+      meetingName: finalMeetingName,
       granularity: Granularity.CHAPTER,
       experts: (experts as Array<Record<string, unknown>>).map((e) => ({
-        expertId: e.expertId as string,
+        expertId: (e.expertId || e.expert_id) as string,
         role: (e.role as ExpertRole) || ExpertRole.MAIN,
-        customPrompt: e.customPrompt as string | undefined,
-        containerId: e.containerId as string | undefined,
-        nodeId: e.nodeId as string | undefined,
-        interruptMode: (e.interruptMode as 'auto' | 'every_n_msgs' | 'every_n_tokens' | 'on_mention') || 'every_n_msgs',
-        interruptThreshold: (e.interruptThreshold as number) || 1
+        customPrompt: (e.customPrompt || e.custom_prompt) as string | undefined,
+        containerId: (e.containerId || e.container_id) as string | undefined,
+        nodeId: (e.nodeId || e.node_id) as string | undefined,
+        interruptMode: (e.interruptMode || e.interrupt_mode || 'every_n_msgs') as 'auto' | 'every_n_msgs' | 'every_n_tokens' | 'on_mention',
+        interruptThreshold: (e.interruptThreshold || e.interrupt_threshold || 1) as number
       })),
       containers: (containers as Array<Record<string, unknown>>).map((c) => ({
-        containerId: c.containerId as string,
+        containerId: (c.containerId || c.container_id) as string,
         name: (c.name as string) || '容器',
         concurrency: (c.concurrency as 'serial' | 'parallel') || 'serial',
-        speakingMode: (c.speakingMode as 'ordered' | 'mention_driven') || 'ordered',
-        contextLayers: c.contextLayers as number | undefined,
-        contextTokens: c.contextTokens as number | undefined,
+        speakingMode: (c.speakingMode || c.speaking_mode || 'ordered') as 'ordered' | 'mention_driven',
+        contextLayers: (c.contextLayers || c.context_layers) as number | undefined,
+        contextTokens: (c.contextTokens || c.context_tokens) as number | undefined,
         repeat: (c.repeat as number) || 1,
-        interruptMode: c.interruptMode as string | undefined,
-        interruptThreshold: (c.interruptThreshold as number) || 1,
-        exitMode: (c.exitMode as 'manual' | 'consensus' | 'ratio' | 'gatekeeper') || 'manual',
-        exitRatio: (c.exitRatio as number) || 0.6,
-        exitGatekeeper: c.exitGatekeeper as string | undefined,
-        exitMaxSpeeches: (c.exitMaxSpeeches as number) || 20,
+        interruptMode: (c.interruptMode || c.interrupt_mode) as string | undefined,
+        interruptThreshold: (c.interruptThreshold || c.interrupt_threshold || 1) as number,
+        exitMode: (c.exitMode || c.exit_mode || 'manual') as 'manual' | 'consensus' | 'ratio' | 'gatekeeper',
+        exitRatio: (c.exitRatio || c.exit_ratio || 0.6) as number,
+        exitGatekeeper: (c.exitGatekeeper || c.exit_gatekeeper) as string | undefined,
+        exitMaxSpeeches: (c.exitMaxSpeeches || c.exit_max_speeches || 20) as number,
         children: (c.children as string[]) || [],
         edges: (c.edges as EdgeConfig[]) || []
       })),
@@ -146,12 +152,20 @@ export function registerMeetingRoutes(app: Express): void {
     };
 
     try {
-      if (pipeline && queueFiles.length > 0) {
+      if (pipeline && finalQueueFiles.length === 0) {
+        // 管道模式但没有输入文件，返回错误
+        writer.write('error', { message: '管道模式需要输入源文件，请先添加输入源' });
+        writer.close();
+        activeMeetings.delete(meetingId);
+        return;
+      }
+
+      if (pipeline && finalQueueFiles.length > 0) {
         // 管道模式
         const pipelineEngine = new PipelineEngine(config);
         activeMeetings.get(meetingId)!.engine = pipelineEngine;
 
-        const files = queueFiles.map((content: string, index: number) => ({
+        const files = finalQueueFiles.map((content: string, index: number) => ({
           index,
           content: { text: content }
         }));
@@ -207,8 +221,20 @@ export function registerMeetingRoutes(app: Express): void {
   // 发送用户反馈
   app.post('/api/projects/:projectId/meeting/feedback', (req: Request, res: Response) => {
     const { meetingId, action, message, expertId } = req.body;
+    const projectId = req.params.projectId;
     
-    const meeting = activeMeetings.get(meetingId);
+    // 尝试通过meetingId查找，如果没有则通过projectId查找
+    let meeting = meetingId ? activeMeetings.get(meetingId) : null;
+    if (!meeting) {
+      // 通过projectId查找活跃的会议
+      for (const [id, m] of activeMeetings.entries()) {
+        if (id.startsWith(projectId + '_')) {
+          meeting = m;
+          break;
+        }
+      }
+    }
+    
     if (!meeting) {
       return res.status(404).json({ error: 'Meeting not found' });
     }

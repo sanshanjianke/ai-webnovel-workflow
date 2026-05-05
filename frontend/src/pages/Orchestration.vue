@@ -44,11 +44,13 @@ onMounted(() => {
     if (event.data?.type === 'sync') {
       const msgs = messageBuffer[event.data.targetId] || []
       for (const m of msgs) {
-        chatChannel.postMessage({ type: 'message', data: m, timestamp: m.timestamp })
+        // 使用JSON序列化/反序列化确保数据可克隆
+        const plainMsg = JSON.parse(JSON.stringify(m))
+        chatChannel.postMessage({ type: 'message', data: plainMsg, timestamp: m.timestamp })
       }
       // 同步队列状态
       if (queueState.value.total > 0) {
-        chatChannel.postMessage({ type: 'queue_state', data: queueState.value })
+        chatChannel.postMessage({ type: 'queue_state', data: { ...queueState.value } })
       }
       // 如果正在运行，发送运行状态
       if (isRunning.value) {
@@ -136,68 +138,87 @@ async function startMeeting(config) {
 function handleSSEEvent(type, data) {
   console.log(`[SSE] ${type}`, data)
   
+  // 统一字段名：expertId -> expert_id, expertType -> expert_type
+  const normalizedData = {
+    ...data,
+    expert_id: data.expert_id || data.expertId,
+    expert_type: data.expert_type || data.expertType
+  }
+  
   switch (type) {
     case 'queue_start':
       console.log(`[QUEUE] 队列开始, 总文件数: ${data.total}`)
       queueState.value = { index: 0, total: data.total || 0 }
-      broadcast(type, data)
+      broadcast(type, normalizedData)
+      break
+    case 'queue_init':
+      console.log(`[QUEUE] 初始化节点 ${data.nodeId} 队列, 文件数: ${data.total}`)
+      broadcast('queue_init', normalizedData)
       break
     case 'queue_item_start':
       console.log(`[QUEUE] 文件 ${data.index + 1}/${data.total} 开始处理`)
       queueState.value = { index: (data.index || 0) + 1, total: data.total || 0 }
-      broadcast(type, data)
+      broadcast(type, normalizedData)
       break
     case 'queue_item_complete':
       console.log(`[QUEUE] 文件 ${data.index + 1}/${data.total} 处理完成`)
-      broadcast('queue_item_complete', data)
+      broadcast('queue_item_complete', normalizedData)
       break
     case 'queue_complete':
       console.log(`[QUEUE] 队列完成, 总文件数: ${data.total}`)
       queueState.value = { index: data.total || 0, total: data.total || 0 }
-      broadcast(type, data)
+      broadcast(type, normalizedData)
       break
     case 'expert_speak':
-      console.log(`[EXPERT] ${data.expert_type} 完成发言, 文件 ${data.file_index + 1}`)
+      console.log(`[EXPERT] ${normalizedData.expert_type} 完成发言, 文件 ${data.file_index + 1}`)
       speechCount.value = data.speech_count || (speechCount.value + 1)
-      broadcast('message', data)
+      broadcast('message', normalizedData)
       break
     case 'expert_chunk':
-      broadcast('chunk', data)
+      broadcast('chunk', normalizedData)
       break
     case 'expert_start':
-      console.log(`[EXPERT] ${data.expert_type} 开始处理文件 ${data.file_index + 1}`)
+      console.log(`[EXPERT] ${normalizedData.expert_type} 开始处理文件 ${data.file_index + 1}`)
       speechCount.value = data.speech_count || (speechCount.value + 1)
-      broadcast('expert_start', data)
+      broadcast('expert_start', normalizedData)
       break
     case 'pipeline_complete':
       isRunning.value = false
       sessionStorage.removeItem('meetingRunning')
       pipelineOutput.value = data.output // 保存输出数据
       broadcast('done', { output: data.output })
-      // 向output节点发送最终结果
-      if (data.output && data.output.meeting_summary) {
-        broadcast('message', {
-          type: 'expert',
-          expert_type: '输出结果',
-          expert_id: 'output',
-          content: data.output.meeting_summary,
-          timestamp: new Date().toISOString()
-        })
+      // 向output节点发送最终结果（支持驼峰和下划线）
+      if (data.output) {
+        const summary = data.output.meeting_summary || data.output.meetingSummary
+        if (summary) {
+          broadcast('message', {
+            type: 'expert',
+            expert_type: '输出结果',
+            expert_id: 'output',
+            content: summary,
+            timestamp: new Date().toISOString()
+          })
+        }
       }
       break
     case 'level_start':
     case 'level_complete':
-      broadcast(type, data)
+      broadcast(type, normalizedData)
       break
     default:
-      broadcast('message', data)
+      broadcast('message', normalizedData)
   }
 }
 
 function broadcast(type, data) {
-  if (!chatChannel) return
+  if (!chatChannel) {
+    console.warn('[BROADCAST] chatChannel is null')
+    return
+  }
   const ts = new Date().toISOString()
-  chatChannel.postMessage({ type, data, timestamp: ts })
+  const message = { type, data, timestamp: ts }
+  console.log('[BROADCAST] Sending:', type, data)
+  chatChannel.postMessage(message)
   // 缓冲消息以供新打开的窗口同步
   const cid = data.container_id || data.expert_id || data.node_id || 'solo'
   if (!messageBuffer[cid]) messageBuffer[cid] = []

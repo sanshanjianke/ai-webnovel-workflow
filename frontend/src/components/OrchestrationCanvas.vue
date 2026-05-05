@@ -1023,6 +1023,13 @@ const orderedNodes = computed(() => {
 })
 
 function runMeeting() {
+  // 检查是否有输入源
+  const inputFiles = inputSourceFiles()
+  if (inputFiles.length === 0) {
+    alert('请先添加输入源文件！\n\n点击工具栏的 📥 按钮添加输入源节点，然后拖入 .md 文件。')
+    return
+  }
+
   // 更新输出节点状态为运行中
   const outputNodes = nodes.value.filter(n => n.type === 'output')
   outputNodes.forEach(n => {
@@ -1091,7 +1098,6 @@ function togglePause() {
 }
 
 function stopMeeting() {
-  isPaused.value = false
   emit('stop')
 }
 
@@ -1299,12 +1305,18 @@ function openChatInline() {
 function hideNodeCtx() { nodeCtx.show = false }
 
 async function downloadOutput() {
-  if (!props.pipelineOutput || !props.pipelineOutput.node_outputs) {
+  if (!props.pipelineOutput) {
     alert('没有可下载的输出数据')
     return
   }
 
-  const nodeOutputs = props.pipelineOutput.node_outputs
+  // 支持驼峰和下划线两种字段名
+  const nodeOutputs = props.pipelineOutput.node_outputs || props.pipelineOutput.nodeOutputs
+  if (!nodeOutputs) {
+    alert('没有可下载的输出数据')
+    return
+  }
+
   const keys = Object.keys(nodeOutputs)
 
   if (keys.length === 0) {

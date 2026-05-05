@@ -26,16 +26,21 @@
         <span v-if="msg.streaming" class="streaming-cursor">▊</span>
       </div>
     </div>
-      <div class="queue-sidebar" v-if="queueState.total >= 1">
-        <div class="queue-sidebar-header">📥 队列</div>
-        <div v-for="i in queueState.total" :key="i"
+      <div class="queue-sidebar" v-if="queueState.total > 0">
+        <div class="queue-sidebar-header">
+          📥 队列 
+          <span v-if="remainingFiles > 0" class="queue-count">{{ remainingFiles }}</span>
+          <span v-else class="queue-done">✓</span>
+        </div>
+        <div v-for="(file, idx) in pendingFiles" :key="idx"
           :class="['queue-sidebar-item', {
-            done: i < queueState.index,
-            current: i === queueState.index,
-            pending: i > queueState.index
+            current: idx === 0
           }]">
           <span class="queue-dot"></span>
-          <span>文件 {{ i }}</span>
+          <span>{{ file }}</span>
+        </div>
+        <div v-if="pendingFiles.length === 0" class="queue-complete-hint">
+          全部完成
         </div>
       </div>
     </div>
@@ -56,8 +61,18 @@ const title = computed(() => route.query.name || (targetId.value === 'solo' ? '�
 const messages = ref([])
 const isRunning = ref(true)
 const msgEl = ref(null)
-const queueState = ref({ index: 0, total: 0 })
+const queueState = ref({ total: 0, files: [] })
 let channel = null
+
+// 计算剩余文件数
+const remainingFiles = computed(() => {
+  return (queueState.value.files || []).length
+})
+
+// 获取待处理的文件列表
+const pendingFiles = computed(() => {
+  return queueState.value.files || []
+})
 
 function getIcon(msg) {
   const icons = { '资深作者': '📕', '读者代表': '📙', '剧情架构师': '🏛', '人物设计师': '🎭', '网络编辑': '💼', '系统': '⚙️', '主编': '💬', '讨论总结师': '📋' }
@@ -67,8 +82,12 @@ function renderMarkdown(text) { return text ? md.render(text) : '' }
 function formatTime(ts) { return ts ? new Date(ts).toLocaleTimeString('zh-CN') : '' }
 
 function matchesTarget(data) {
-  if (!data) return false
+  if (!data) {
+    console.log('[CHAT] matchesTarget: data is null')
+    return false
+  }
   const cid = data.container_id || data.expert_id || 'solo'
+  console.log('[CHAT] matchesTarget:', { cid, targetId: targetId.value, nodeId: data.node_id, match: cid === targetId.value || data.node_id === targetId.value })
   if (cid === targetId.value) return true
   if (data.node_id === targetId.value) return true
   return false
@@ -78,6 +97,7 @@ onMounted(() => {
   channel = new BroadcastChannel('meeting-chat')
   channel.onmessage = (event) => {
     const { type, data, timestamp } = event.data || {}
+    console.log('[CHAT] Received message:', type, data)
     if (!type) return
 
     if (type === 'done') {
@@ -95,18 +115,22 @@ onMounted(() => {
     }
 
     if (type === 'queue_start') {
-      queueState.value = { index: 0, total: data.total || 0 }
+      // 只记录总文件数，不显示文件列表
+      queueState.value = { total: data.total || 0, files: [] }
       return
     }
 
-    if (type === 'queue_item_start') {
-      queueState.value = { index: (data.index || 0) + 1, total: data.total || 0 }
-      messages.value = []  // 清空上一份文件的聊天
-      return
-    }
-
-    if (type === 'queue_item_complete') {
-      // 文件处理完成，可以在这里添加完成标记
+    if (type === 'queue_init') {
+      // 只有当目标节点匹配时才初始化队列（支持驼峰和下划线）
+      const nodeId = data.nodeId || data.node_id
+      const expertId = data.expertId || data.expert_id
+      // 同时检查nodeId和expertId，因为聊天窗口可能是用expertId打开的
+      if (nodeId === targetId.value || expertId === targetId.value) {
+        queueState.value = { 
+          total: data.total || 0, 
+          files: Array.isArray(data.fileNames) ? data.fileNames : (Array.isArray(data.file_names) ? data.file_names : [])
+        }
+      }
       return
     }
 
@@ -115,18 +139,22 @@ onMounted(() => {
       return
     }
 
-    if (type === 'queue_item_complete') {
-      return
-    }
-
     if (type === 'queue_complete') {
       isRunning.value = false
-      queueState.value = { index: data.total || 0, total: data.total || 0 }
+      // 清空队列文件，但保留total用于显示
+      queueState.value = { ...queueState.value, files: [] }
       return
     }
 
     if (type === 'expert_start') {
       if (!matchesTarget(data)) return
+      // 添加文件到队列
+      if (data.fileIndex !== undefined) {
+        const fileName = `文件${data.fileIndex + 1}`
+        if (!queueState.value.files.includes(fileName)) {
+          queueState.value.files.push(fileName)
+        }
+      }
       messages.value.push({
         type: 'expert', expert_type: data.expert_type,
         expert_id: data.expert_id, content: '', thinking: '', streaming: true,
@@ -141,13 +169,14 @@ onMounted(() => {
       const msgs = messages.value
       let last = msgs.length > 0 ? msgs[msgs.length - 1] : null
       if (!last || !last.streaming) {
-        last = { type: 'expert', expert_type: data.expert_type || '', content: '', thinking: '', streaming: true,
+        last = { type: 'expert', expert_type: data.expert_type || data.expertType || '', content: '', thinking: '', streaming: true,
           timestamp: timestamp || new Date().toISOString() }
         msgs.push(last)
       }
-      if (data.chunk_type === 'thinking') {
+      const chunkType = data.chunk_type || data.chunkType
+      if (chunkType === 'thinking') {
         last.thinking = (last.thinking || '') + (data.content || '')
-      } else if (data.chunk_type === 'content') {
+      } else if (chunkType === 'content') {
         last.content += data.content || ''
       }
       scrollDown()
@@ -156,6 +185,14 @@ onMounted(() => {
 
     if (type === 'message') {
       if (!matchesTarget(data)) return
+      // 从队列中移除已完成的文件
+      if (data.fileIndex !== undefined) {
+        const fileName = `文件${data.fileIndex + 1}`
+        const idx = queueState.value.files.indexOf(fileName)
+        if (idx > -1) {
+          queueState.value.files.splice(idx, 1)
+        }
+      }
       const msgs = messages.value
       let last = msgs.length > 0 ? msgs[msgs.length - 1] : null
       // 如果是 expert_speak 且有流式消息，定型之
@@ -205,7 +242,10 @@ onUnmounted(() => {
 .popup-body { flex: 1; display: flex; overflow: hidden; }
 .queue-sidebar { width: 140px; flex-shrink: 0; padding: 12px 8px; border-left: 1px solid #e0e0e0; background: #fafafa; overflow-y: auto; }
 .popup-library { width: 240px; flex-shrink: 0; border-right: 1px solid #e0e0e0; overflow-y: auto; }
-.queue-sidebar-header { font-size: 0.8rem; font-weight: 600; color: #666; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #eee; }
+.queue-sidebar-header { font-size: 0.8rem; font-weight: 600; color: #666; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+.queue-count { background: #3498db; color: white; padding: 1px 6px; border-radius: 10px; font-size: 0.7rem; }
+.queue-done { background: #27ae60; color: white; padding: 1px 6px; border-radius: 10px; font-size: 0.7rem; }
+.queue-complete-hint { text-align: center; color: #27ae60; font-size: 0.75rem; padding: 8px; font-style: italic; }
 .queue-sidebar-item { display: flex; align-items: center; gap: 6px; padding: 4px 6px; font-size: 0.78rem; border-radius: 4px; margin-bottom: 2px; }
 .queue-sidebar-item.current { background: #e8f4fd; color: #3498db; font-weight: 600; }
 .queue-sidebar-item.done { color: #27ae60; }
