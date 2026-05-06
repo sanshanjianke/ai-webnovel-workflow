@@ -434,6 +434,99 @@ export interface PipelineOutput {
   meetingSummary: string;
 }
 
+// ============ 专家定义 (JSON-based) ============
+
+export interface ExpertDefinition {
+  expertId: string;
+  expertType: string;
+  icon: string;
+  description: string;
+  temperature: number;
+  prompt_template: string;
+  role_instructions: Record<string, string>;
+  granularity_contexts: Record<string, string>;
+  self_review_prompt: string;
+  suggestion_patterns: string[];
+  agent_defaults: AgentStopConfig;
+  builtin: boolean;
+}
+
+// ============ Agent 中止条件 ============
+
+export interface AgentStopConfig {
+  enableTagStop: boolean;
+  blockEveryNRounds: number;    // 0 = disabled
+  maxRounds: number;
+  onMaxRounds: 'accept_last' | 'pick_best';
+}
+
+// ============ 管道对象 ============
+
+export interface PipelineObject {
+  id: string;
+  name: string;
+  files: PipelineObjectFile[];
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  currentNodeId?: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface PipelineObjectFile {
+  path: string;
+  content: string;
+  producer: 'input' | string;
+  category: 'input' | 'report' | 'chat_log';
+}
+
+// ============ 聊天记录 ============
+
+export interface ExpertChatLog {
+  expertId: string;
+  expertType: string;
+  objectId: string;
+  reportFile: string;
+  startedAt: string;
+  completedAt: string | null;
+  rounds: ExpertRound[];
+}
+
+export interface ExpertRound {
+  round: number;
+  messages: ExpertMessage[];
+  selfScore?: number;
+  completedAt?: string;
+}
+
+export interface ExpertMessage {
+  role: 'system' | 'assistant' | 'user';
+  content?: string;
+  thinking?: string;
+  timestamp: string;
+}
+
+// ============ Agent 上下文 ============
+
+export interface AgentContext {
+  vision?: Record<string, string>;
+  worldbook?: string;
+  rag?: string;
+  customPrompt?: string;
+  round: number;
+  userFeedback?: string;
+  chatLog?: ExpertChatLog;
+  object?: PipelineObject;
+  stopConfig: AgentStopConfig;
+  readCategories: ('input' | 'report' | 'chat_log')[];
+}
+
+// ============ Agent 事件 ============
+
+export interface AgentEvent {
+  type: 'agent_round_start' | 'agent_chunk' | 'agent_round_complete' | 'agent_complete' | 'agent_waiting_user';
+  data: Record<string, unknown>;
+}
+
 // ============ 用户反馈 ============
 
 export interface UserFeedback {

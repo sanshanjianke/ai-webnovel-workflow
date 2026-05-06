@@ -11,6 +11,8 @@ import WorldBook from './pages/WorldBook.vue'
 import Settings from './pages/Settings.vue'
 import Library from './pages/Library.vue'
 import ChatPopup from './pages/ChatPopup.vue'
+import OutputPage from './pages/OutputPage.vue'
+import ViewerPage from './pages/ViewerPage.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
@@ -21,7 +23,9 @@ const routes = [
   { path: '/worldbook', component: WorldBook },
   { path: '/library', component: Library },
   { path: '/settings', component: Settings },
-  { path: '/chat-popup', component: ChatPopup }
+  { path: '/chat-popup', component: ChatPopup },
+  { path: '/output', component: OutputPage },
+  { path: '/view', component: ViewerPage }
 ]
 
 const router = createRouter({

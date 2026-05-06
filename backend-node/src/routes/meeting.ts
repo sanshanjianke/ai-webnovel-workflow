@@ -3,12 +3,17 @@ import { Express, Request, Response } from 'express';
 import { getProjectManager } from '../services/project-manager';
 import { MeetingEngine, MeetingEvent } from '../services/meeting-engine';
 import { PipelineEngine, PipelineEvent } from '../services/pipeline-engine';
-import { 
+import { ObjectPipelineEngine, PipelineEventV2 } from '../services/object-pipeline-engine';
+import { createPipelineObject } from '../models/pipeline-object';
+import { exportPipelineToZip } from '../services/zip-exporter';
+import { loadCheckpoint, deleteCheckpoint, cleanIncompleteRound, restoreObjects } from '../services/recovery-manager';
+import {
   MeetingConfig, ExpertConfig, ContainerConfig, EdgeConfig,
-  ExpertRole, Granularity, UserFeedback 
+  ExpertRole, Granularity, UserFeedback, ExpertDefinition, AgentStopConfig
 } from '../protocols';
 import { SSEWriter } from '../utils/sse';
 import { listExperts } from '../experts';
+import { expertLoader } from '../services/expert-loader';
 
 // 预设模板
 const PRESET_CONFIGS: Record<string, Partial<MeetingConfig>> = {
@@ -38,7 +43,7 @@ const PRESET_CONFIGS: Record<string, Partial<MeetingConfig>> = {
 
 // 存储运行中的会议
 const activeMeetings = new Map<string, {
-  engine: MeetingEngine | PipelineEngine;
+  engine: MeetingEngine | PipelineEngine | ObjectPipelineEngine;
   feedbackQueue: Array<(feedback: UserFeedback | null) => void>;
 }>();
 
@@ -52,7 +57,100 @@ export function registerMeetingRoutes(app: Express): void {
 
   // 获取专家列表
   app.get('/api/experts', (req: Request, res: Response) => {
-    res.json({ experts: listExperts() });
+    const projectId = req.query.projectId as string || '';
+    const project = projectId ? pm.getProject(projectId) : null;
+    const projectPath = project?.path || '';
+
+    const builtinExperts: Record<string, { label: string; icon: string; desc: string }> = {};
+    const customExpertsData: Record<string, { id: string; label: string; icon: string; desc: string; prompt: string }> = {};
+
+    const allExperts = expertLoader.listExperts(projectPath);
+    for (const expert of allExperts) {
+      const def = expertLoader.getExpert(expert.id, projectPath);
+      if (expert.builtin) {
+        builtinExperts[expert.id] = { label: expert.name, icon: expert.icon, desc: expert.description };
+      } else {
+        customExpertsData[expert.id] = {
+          id: expert.id, label: expert.name, icon: expert.icon,
+          desc: expert.description,
+          prompt: def?.prompt_template || ''
+        };
+      }
+    }
+
+    res.json({
+      experts: allExperts.filter(e => e.builtin).map(e => e.id),
+      builtin_experts: builtinExperts,
+      custom_experts: customExpertsData
+    });
+  });
+
+  // 自定义专家 CRUD
+  app.post('/api/experts/custom', (req: Request, res: Response) => {
+    try {
+      const { id, name, icon, description, prompt_template } = req.body;
+      if (!id || !name) {
+        return res.status(400).json({ error: 'id and name are required' });
+      }
+
+      const projectId = req.query.projectId as string || '';
+      const project = projectId ? pm.getProject(projectId) : null;
+      const projectPath = project?.path || '';
+
+      const definition: ExpertDefinition = {
+        expertId: id,
+        expertType: name,
+        icon: icon || '📄',
+        description: description || '',
+        temperature: 0.7,
+        prompt_template: prompt_template || '',
+        role_instructions: {},
+        granularity_contexts: {},
+        self_review_prompt: '请审视并修正你的意见。定稿时请包裹在<报告>...</报告>中。',
+        suggestion_patterns: [],
+        agent_defaults: {
+          enableTagStop: true,
+          blockEveryNRounds: 0,
+          maxRounds: 3,
+          onMaxRounds: 'accept_last'
+        },
+        builtin: false
+      };
+
+      expertLoader.saveCustomExpert(projectPath, definition);
+      res.json({ status: 'created', id });
+    } catch (error) {
+      res.status(500).json({ error: String(error) });
+    }
+  });
+
+  app.delete('/api/experts/custom/:id', (req: Request, res: Response) => {
+    try {
+      const projectId = req.query.projectId as string || '';
+      const project = projectId ? pm.getProject(projectId) : null;
+      const projectPath = project?.path || '';
+
+      const success = expertLoader.deleteCustomExpert(projectPath, req.params.id);
+      if (success) {
+        res.json({ status: 'deleted' });
+      } else {
+        res.status(404).json({ error: 'Expert not found' });
+      }
+    } catch (error) {
+      res.status(500).json({ error: String(error) });
+    }
+  });
+
+  app.get('/api/experts/:id/prompt', (req: Request, res: Response) => {
+    const projectId = req.query.projectId as string || '';
+    const project = projectId ? pm.getProject(projectId) : null;
+    const projectPath = project?.path || '';
+
+    const def = expertLoader.getExpert(req.params.id, projectPath);
+    if (!def) {
+      return res.status(404).json({ error: 'Expert not found' });
+    }
+    res.json({ prompt_template: def.prompt_template });
   });
 
   // 启动会议（SSE 流式）
@@ -69,8 +167,10 @@ export function registerMeetingRoutes(app: Express): void {
       containers = [],
       edges = [],
       pipeline = false,
+      pipeline_version: pipelineVersion = 1,
       queueFiles = [],
-      queue_files: queueFilesAlt = []
+      queue_files: queueFilesAlt = [],
+      agent_configs: agentConfigs = {}
     } = req.body;
 
     // 支持两种字段名
@@ -151,17 +251,64 @@ export function registerMeetingRoutes(app: Express): void {
       });
     };
 
+    // 清除专家缓存，确保模板修改后无需重启服务器
+    expertLoader.clearCache();
+
     try {
       if (pipeline && finalQueueFiles.length === 0) {
-        // 管道模式但没有输入文件，返回错误
         writer.write('error', { message: '管道模式需要输入源文件，请先添加输入源' });
         writer.close();
         activeMeetings.delete(meetingId);
         return;
       }
 
-      if (pipeline && finalQueueFiles.length > 0) {
-        // 管道模式
+      if (pipeline && pipelineVersion === 2 && finalQueueFiles.length > 0) {
+        // 管道模式 v2 — ObjectPipelineEngine
+        const engine = new ObjectPipelineEngine(config);
+        engine.meetingId = meetingId;
+        engine.checkpointDir = `${project.path}/outputs`;
+        activeMeetings.get(meetingId)!.engine = engine;
+
+        // Apply per-node agent configs and read configs
+        const ac = agentConfigs as Record<string, Record<string, unknown>>;
+        for (const [nodeId, cfg] of Object.entries(ac)) {
+          if (cfg.stopConfig) {
+            engine.setAgentConfig(nodeId, cfg.stopConfig as AgentStopConfig);
+          }
+          if (cfg.readCategories) {
+            engine.setReadConfig(nodeId, cfg.readCategories as ('input' | 'report' | 'chat_log')[]);
+          }
+        }
+
+        // Create pipeline objects from queue files
+        const objects = finalQueueFiles.map((content: string, index: number) =>
+          createPipelineObject(`对象${index + 1}`, [{ path: `input_${index + 1}.txt`, content }])
+        );
+
+        for await (const event of engine.processQueue(
+          objects,
+          {},
+          worldbookText,
+          ''
+        )) {
+          writer.write(event.type, event.data);
+        }
+
+        // 持久化管道产出供后续导出
+        try {
+          const fs = require('fs');
+          const outputDir = `${project.path}/outputs`;
+          if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+          }
+          const outPath = `${outputDir}/pipeline_${meetingId}.json`;
+          fs.writeFileSync(outPath, JSON.stringify(objects.map((o: any) => ({
+            id: o.id, name: o.name, status: o.status,
+            files: o.files.map((f: any) => ({ path: f.path, content: f.content, category: f.category, producer: f.producer }))
+          })), null, 2), 'utf-8');
+        } catch {}
+      } else if (pipeline && finalQueueFiles.length > 0) {
+        // 管道模式 v1 — PipelineEngine
         const pipelineEngine = new PipelineEngine(config);
         activeMeetings.get(meetingId)!.engine = pipelineEngine;
 
@@ -172,7 +319,7 @@ export function registerMeetingRoutes(app: Express): void {
 
         for await (const event of pipelineEngine.processQueue(
           files,
-          {},  // 不再自动导入vision，由用户通过输入源导入
+          {},
           worldbookText,
           ''
         )) {
@@ -184,7 +331,7 @@ export function registerMeetingRoutes(app: Express): void {
         activeMeetings.get(meetingId)!.engine = meetingEngine;
 
         for await (const event of meetingEngine.run(
-          {},  // 不再自动导入vision，由用户通过输入源导入
+          {},
           worldbookText,
           '',
           humanFeedback
@@ -239,7 +386,19 @@ export function registerMeetingRoutes(app: Express): void {
       return res.status(404).json({ error: 'Meeting not found' });
     }
 
-    // 发送反馈到等待的会议
+    // 对于 ObjectPipelineEngine (v2)，直接注入反馈
+    if (meeting.engine instanceof ObjectPipelineEngine) {
+      if (action === 'stop') {
+        meeting.engine.stop();
+      } else if (action === 'accept') {
+        meeting.engine.stop();
+      } else if (message && expertId) {
+        meeting.engine.injectFeedback(expertId, message);
+      }
+      return res.json({ status: 'sent' });
+    }
+
+    // 发送反馈到等待的会议 (v1)
     const resolver = meeting.feedbackQueue.shift();
     if (resolver) {
       resolver({ action, message, expertId });
@@ -263,6 +422,142 @@ export function registerMeetingRoutes(app: Express): void {
       res.json(output);
     } else {
       res.status(404).json({ error: 'Output not found' });
+    }
+  });
+
+  // 导出管道产出为 ZIP
+  app.get('/api/projects/:projectId/meeting/export/:sessionId', async (req: Request, res: Response) => {
+    const project = pm.getProject(req.params.projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    try {
+      const fs = require('fs');
+      const outputPath = `${project.path}/outputs/pipeline_${req.params.sessionId}.json`;
+
+      if (!fs.existsSync(outputPath)) {
+        // 尝试模糊匹配
+        const outputDir = `${project.path}/outputs`;
+        const files = fs.existsSync(outputDir) ? fs.readdirSync(outputDir) : [];
+        const match = files.find((f: string) =>
+          f.startsWith(`pipeline_${req.params.projectId}_`) || f.endsWith(`_${req.params.sessionId}.json`)
+        );
+        if (match) {
+          const objects = JSON.parse(fs.readFileSync(`${outputDir}/${match}`, 'utf-8'));
+          const { buffer, filename } = await exportPipelineToZip(objects);
+          res.setHeader('Content-Type', 'application/zip');
+          res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+          return res.send(buffer);
+        }
+        return res.status(404).json({ error: 'Export data not found' });
+      }
+
+      const objects = JSON.parse(fs.readFileSync(outputPath, 'utf-8'));
+      const { buffer, filename } = await exportPipelineToZip(objects);
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(buffer);
+    } catch (error) {
+      res.status(500).json({ error: String(error) });
+    }
+  });
+
+  // 恢复中断的管道
+  app.post('/api/projects/:projectId/meeting/resume', async (req: Request, res: Response) => {
+    const project = pm.getProject(req.params.projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const { sessionId, agent_configs: agentConfigs = {} } = req.body;
+    if (!sessionId) {
+      return res.status(400).json({ error: 'sessionId is required' });
+    }
+
+    const checkpointDir = `${project.path}/outputs`;
+    const checkpoint = loadCheckpoint(checkpointDir, sessionId);
+    if (!checkpoint) {
+      return res.status(404).json({ error: 'Checkpoint not found' });
+    }
+
+    // Clean incomplete rounds from all objects' chat logs
+    for (const sobj of checkpoint.objects) {
+      for (const f of sobj.files) {
+        if (f.category === 'chat_log' && f.content) {
+          try {
+            const chatLog = JSON.parse(f.content);
+            if (cleanIncompleteRound(chatLog)) {
+              f.content = JSON.stringify(chatLog);
+            }
+          } catch {}
+        }
+      }
+    }
+
+    // Restore objects
+    const objects = restoreObjects(checkpoint.objects);
+
+    // Create engine from saved config
+    const engine = new ObjectPipelineEngine(checkpoint.config);
+    engine.meetingId = checkpoint.state.meetingId;
+    engine.checkpointDir = checkpointDir;
+
+    // Apply per-node agent configs
+    const ac = agentConfigs as Record<string, Record<string, unknown>>;
+    for (const [nodeId, cfg] of Object.entries(ac)) {
+      if (cfg.stopConfig) {
+        engine.setAgentConfig(nodeId, cfg.stopConfig as AgentStopConfig);
+      }
+      if (cfg.readCategories) {
+        engine.setReadConfig(nodeId, cfg.readCategories as ('input' | 'report' | 'chat_log')[]);
+      }
+    }
+
+    // Register for feedback
+    const newMeetingId = checkpoint.state.meetingId;
+    const feedbackQueue: Array<(feedback: UserFeedback | null) => void> = [];
+    activeMeetings.set(newMeetingId, {
+      engine: engine,
+      feedbackQueue
+    });
+
+    // Set SSE
+    const writer = new SSEWriter(res);
+
+    // Read worldbook
+    const worldbookPath = `${project.path}/worldbook.json`;
+    let worldbookText = '';
+    try {
+      const fs = require('fs');
+      if (fs.existsSync(worldbookPath)) {
+        const wb = JSON.parse(fs.readFileSync(worldbookPath, 'utf-8'));
+        const entries = wb.entries || {};
+        worldbookText = Object.values(entries)
+          .map((e) => {
+            const entry = e as Record<string, unknown>;
+            const keys = entry.keys as string[] | undefined;
+            return `${keys?.[0] || ''}: ${entry.content || ''}`;
+          })
+          .join('\n');
+      }
+    } catch {}
+
+    try {
+      for await (const event of engine.processQueue(
+        objects,
+        {},
+        worldbookText,
+        '',
+        checkpoint.state
+      )) {
+        writer.write(event.type, event.data);
+      }
+    } catch (error) {
+      writer.write('error', { message: String(error) });
+    } finally {
+      activeMeetings.delete(newMeetingId);
+      writer.close();
     }
   });
 

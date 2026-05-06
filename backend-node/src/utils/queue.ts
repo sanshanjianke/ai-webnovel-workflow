@@ -82,6 +82,16 @@ export class AsyncQueue<T> {
     this.items = [];
   }
 
+  snapshot(): T[] {
+    return [...this.items];
+  }
+
+  restore(items: T[]): void {
+    this.items = [...items];
+    this.closed = false;
+    this.error = null;
+  }
+
   dequeueSync(): T | undefined {
     if (this.items.length > 0) {
       return this.items.shift();

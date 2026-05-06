@@ -21,7 +21,7 @@ export class OpenAICompatLLM implements LLMProvider {
       model: options.model || this.model,
       messages: [{ role: 'user', content: prompt }],
       temperature: options.temperature ?? 0.7,
-      max_tokens: options.maxTokens ?? 4096
+      max_tokens: options.maxTokens ?? 16384
     };
 
     // 启用 think 模式
@@ -59,7 +59,7 @@ export class OpenAICompatLLM implements LLMProvider {
       model: options.model || this.model,
       messages: [{ role: 'user', content: prompt }],
       temperature: options.temperature ?? 0.7,
-      max_tokens: options.maxTokens ?? 4096,
+      max_tokens: options.maxTokens ?? 16384,
       stream: true
     };
 

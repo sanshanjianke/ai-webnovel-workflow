@@ -89,7 +89,7 @@
         <div class="floating-toolbar">
           <span class="toolbar-label">工具</span>
           <span class="toolbar-sep"></span>
-          <button class="toolbar-btn" @click="addContainer" title="容器（框选专家，可配群聊/循环）">📦</button>
+          <button class="toolbar-btn" @click="addContainer" title="群聊（多专家同时讨论）">📦</button>
           <button class="toolbar-btn" @click="addPlaceholder('worldbook')" title="世界书节点">📖</button>
           <button class="toolbar-btn" @click="addPlaceholder('rag')" title="RAG节点">🔍</button>
           <button class="toolbar-btn" @click="addPlaceholder('splitter')" title="章节拆分师">✂️</button>
@@ -105,7 +105,7 @@
       <!-- ── 右侧面板：容器配置 ── -->
       <div class="config-panel" v-if="selectedNode && selectedNode.type === 'container'">
         <div class="panel-header-row">
-          <h4>容器配置</h4>
+          <h4>群聊配置</h4>
           <button class="btn-back" @click="selectedNode = null">← 返回</button>
         </div>
         <div class="config-field">
@@ -147,11 +147,11 @@
         </div>
 
         <div class="config-section">
-          <label class="section-label">提及驱动退出条件</label>
+          <label class="section-label">退出条件</label>
         </div>
         <div class="config-field">
           <label>退出方式</label>
-          <select v-model="containerCfg.exit_mode" @change="onContainerChange" :disabled="containerCfg.speaking_mode !== 'mention_driven'">
+          <select v-model="containerCfg.exit_mode" @change="onContainerChange" >
             <option value="manual">手动</option>
             <option value="consensus">全部赞同</option>
             <option value="ratio">多数赞同</option>
@@ -160,18 +160,18 @@
         </div>
         <div class="config-field" v-if="containerCfg.exit_mode === 'ratio'">
           <label>赞同比例 ({{ (containerCfg.exit_ratio * 100).toFixed(0) }}%)</label>
-          <input v-model.number="containerCfg.exit_ratio" type="range" min="0.1" max="1" step="0.1" @change="onContainerChange" :disabled="containerCfg.speaking_mode !== 'mention_driven'" />
+          <input v-model.number="containerCfg.exit_ratio" type="range" min="0.1" max="1" step="0.1" @change="onContainerChange"  />
         </div>
         <div class="config-field" v-if="containerCfg.exit_mode === 'gatekeeper'">
           <label>门禁专家</label>
-          <select v-model="containerCfg.exit_gatekeeper" @change="onContainerChange" :disabled="containerCfg.speaking_mode !== 'mention_driven'">
+          <select v-model="containerCfg.exit_gatekeeper" @change="onContainerChange" >
             <option :value="null">---</option>
             <option v-for="child in containerChildren" :key="child" :value="child">{{ child }}</option>
           </select>
         </div>
         <div class="config-field">
           <label>最大发言次数（0=不限）</label>
-          <input v-model.number="containerCfg.exit_max_speeches" type="number" min="0" max="500" @change="onContainerChange" :disabled="containerCfg.speaking_mode !== 'mention_driven'" />
+          <input v-model.number="containerCfg.exit_max_speeches" type="number" min="0" max="500" @change="onContainerChange"  />
         </div>
 
         <div class="config-section">
@@ -265,6 +265,50 @@
         <div class="config-field" v-if="(selectedNode.data.interrupt_mode || 'every_n_msgs') !== 'auto' && (selectedNode.data.interrupt_mode || 'every_n_msgs') !== 'on_mention'">
           <label>阈值</label>
           <input :value="selectedNode.data.interrupt_threshold || 1" @change="setInterrupt('threshold', $event.target.value)" type="number" min="1" max="1000" />
+        </div>
+        <!-- Agent 迭代配置 (仅 pipeline_version=2 时生效) -->
+        <div class="config-section">
+          <label class="section-label">Agent 迭代配置 (v2)</label>
+        </div>
+        <div class="config-field config-inline">
+          <label class="checkbox-label">
+            <input type="checkbox" v-model="agentTagStop" @change="onAgentConfigChange" />
+            标签中止 (&lt;stop&gt;)
+          </label>
+        </div>
+        <div class="config-field">
+          <label>最大轮数</label>
+          <input v-model.number="agentMaxRounds" type="number" min="1" max="10" @change="onAgentConfigChange" />
+        </div>
+        <div class="config-field">
+          <label>超出轮数行为</label>
+          <select v-model="agentOnMaxRounds" @change="onAgentConfigChange">
+            <option value="accept_last">接受最后一轮</option>
+            <option value="pick_best">选择最高分轮次</option>
+          </select>
+        </div>
+        <div class="config-field">
+          <label>每 N 轮阻塞等待用户</label>
+          <input v-model.number="agentBlockEveryNRounds" type="number" min="0" max="10" @change="onAgentConfigChange" />
+          <small v-if="agentBlockEveryNRounds > 0">每 {{ agentBlockEveryNRounds }} 轮暂停，等待用户反馈</small>
+          <small v-else>0 = 不阻塞</small>
+        </div>
+        <div class="config-section">
+          <label class="section-label">上下文读取</label>
+        </div>
+        <div class="config-field config-inline">
+          <label class="checkbox-label">
+            <input type="checkbox" v-model="agentReadInput" @change="onAgentConfigChange" />
+            输入文件
+          </label>
+          <label class="checkbox-label" style="margin-left:12px;">
+            <input type="checkbox" v-model="agentReadReport" @change="onAgentConfigChange" />
+            上游报告
+          </label>
+          <label class="checkbox-label" style="margin-left:12px;">
+            <input type="checkbox" v-model="agentReadChatLog" @change="onAgentConfigChange" />
+            聊天记录
+          </label>
         </div>
         <div class="config-actions">
           <button class="btn btn-danger btn-sm" @click="removeNode">删除节点</button>
@@ -498,6 +542,15 @@ const showCreateModal = ref(false)
 const customPrompt = ref('')
 const importInput = ref(null)
 
+// Agent 迭代配置 (v2)
+const agentTagStop = ref(true)
+const agentMaxRounds = ref(3)
+const agentOnMaxRounds = ref('accept_last')
+const agentBlockEveryNRounds = ref(0)
+const agentReadInput = ref(true)
+const agentReadReport = ref(true)
+const agentReadChatLog = ref(false)
+
 const customExperts = ref({})
 
 // ── 输入源队列 ──
@@ -624,7 +677,8 @@ onUnmounted(() => {
 
 async function fetchCustomExperts() {
   try {
-    const res = await axios.get('/api/experts')
+    const params = props.projectId ? `?projectId=${encodeURIComponent(props.projectId)}` : ''
+    const res = await axios.get(`/api/experts${params}`)
     customExperts.value = res.data.custom_experts || {}
   } catch (e) { console.warn('Failed to fetch custom experts:', e) }
 }
@@ -672,7 +726,8 @@ async function createCustomExpert() {
       description: newExpert.description,
       prompt_template: newExpert.prompt_template
     }
-    await axios.post('/api/experts/custom', payload)
+    const apiParams = props.projectId ? `?projectId=${encodeURIComponent(props.projectId)}` : ''
+    await axios.post(`/api/experts/custom${apiParams}`, payload)
     await fetchCustomExperts()
     showCreateModal.value = false
     Object.assign(newExpert, { id: '', name: '', icon: '📄', description: '', prompt_template: '' })
@@ -684,8 +739,11 @@ async function createCustomExpert() {
 
 async function deleteCustomExpert(id) {
   if (!confirm('确定删除此自定义专家？')) return
-  try { await axios.delete(`/api/experts/custom/${id}`); await fetchCustomExperts() }
-  catch (e) { alert('删除失败') }
+  try {
+    const dParams = props.projectId ? `?projectId=${encodeURIComponent(props.projectId)}` : ''
+    await axios.delete(`/api/experts/custom/${id}${dParams}`)
+    await fetchCustomExperts()
+  } catch (e) { alert('删除失败') }
 }
 
 // ── 专家右键菜单 ──
@@ -707,7 +765,8 @@ async function viewExpert() {
   hideExpertContext()
   const id = expertCtx.id
   try {
-    const res = await axios.get(`/api/experts/${id}/prompt`)
+    const promptParams = props.projectId ? `?projectId=${encodeURIComponent(props.projectId)}` : ''
+    const res = await axios.get(`/api/experts/${id}/prompt${promptParams}`)
     viewExpertData.id = id
     viewExpertData.name = expertCtx.data.label
     viewExpertData.icon = expertCtx.data.icon
@@ -727,8 +786,10 @@ async function editExpert() {
   hideExpertContext()
   const id = expertCtx.id
   try {
-    const res = await axios.get(`/api/experts/${id}/prompt`)
-    const info = (await axios.get('/api/experts')).data.custom_experts[id] || {}
+    const promptParams = props.projectId ? `?projectId=${encodeURIComponent(props.projectId)}` : ''
+    const res = await axios.get(`/api/experts/${id}/prompt${promptParams}`)
+    const infoParams = props.projectId ? `?projectId=${encodeURIComponent(props.projectId)}` : ''
+    const info = (await axios.get(`/api/experts${infoParams}`)).data.custom_experts[id] || {}
     editExpertData.id = id
     editExpertData.name = info.label || expertCtx.data.label
     editExpertData.icon = info.icon || expertCtx.data.icon
@@ -749,8 +810,10 @@ async function saveEditExpert() {
   }
   // Update via reload: delete old registration, write file, re-register
   try {
-    await axios.delete(`/api/experts/custom/${editExpertData.id}`)
-    await axios.post('/api/experts/custom', payload)
+    const delParams = props.projectId ? `?projectId=${encodeURIComponent(props.projectId)}` : ''
+    await axios.delete(`/api/experts/custom/${editExpertData.id}${delParams}`)
+    const apiParams = props.projectId ? `?projectId=${encodeURIComponent(props.projectId)}` : ''
+    await axios.post(`/api/experts/custom${apiParams}`, payload)
     await fetchCustomExperts()
     showEditExpert.value = false
   } catch (e) {
@@ -900,7 +963,20 @@ function removeNode() {
 }
 
 function onConfigChange() {
-  if (selectedNode.value) selectedNode.value.data.customPrompt = customPrompt.value
+  if (selectedNode.value) {
+    selectedNode.value.data.customPrompt = customPrompt.value
+  }
+}
+
+function onAgentConfigChange() {
+  if (!selectedNode.value || selectedNode.value.type !== 'expert') return
+  selectedNode.value.data.agentTagStop = agentTagStop.value
+  selectedNode.value.data.agentMaxRounds = agentMaxRounds.value
+  selectedNode.value.data.agentOnMaxRounds = agentOnMaxRounds.value
+  selectedNode.value.data.agentBlockEveryNRounds = agentBlockEveryNRounds.value
+  selectedNode.value.data.agentReadInput = agentReadInput.value
+  selectedNode.value.data.agentReadReport = agentReadReport.value
+  selectedNode.value.data.agentReadChatLog = agentReadChatLog.value
 }
 
 const nodeTriggers = computed(() => {
@@ -960,7 +1036,7 @@ function onContainerChange() {
 }
 
 function loadContainerConfig(node) {
-  containerCfg.name = node.data.name || node.data.label || '容器'
+  containerCfg.name = node.data.name || node.data.label || '群聊'
   containerCfg.concurrency = node.data.concurrency || 'serial'
   containerCfg.speaking_mode = node.data.speaking_mode || 'ordered'
   containerCfg.use_layers = node.data.context_layers != null
@@ -1022,6 +1098,28 @@ const orderedNodes = computed(() => {
   })
 })
 
+function buildAgentConfigs() {
+  const configs = {}
+  const expertNodes = nodes.value.filter(n => n.type === 'expert')
+  for (const node of expertNodes) {
+    const readCategories = []
+    if (node.data.agentReadInput !== false) readCategories.push('input')
+    if (node.data.agentReadReport !== false) readCategories.push('report')
+    if (node.data.agentReadChatLog) readCategories.push('chat_log')
+
+    configs[node.id] = {
+      stopConfig: {
+        enableTagStop: node.data.agentTagStop !== undefined ? node.data.agentTagStop : true,
+        blockEveryNRounds: node.data.agentBlockEveryNRounds || 0,
+        maxRounds: node.data.agentMaxRounds || 3,
+        onMaxRounds: node.data.agentOnMaxRounds || 'accept_last'
+      },
+      readCategories: readCategories.length > 0 ? readCategories : ['input', 'report']
+    }
+  }
+  return configs
+}
+
 function runMeeting() {
   // 检查是否有输入源
   const inputFiles = inputSourceFiles()
@@ -1080,9 +1178,11 @@ function runMeeting() {
   emit('run', {
     meeting_name: meetingName.value,
     pipeline: true,
+    pipeline_version: 2,
     experts,
     containers,
     queue_files: inputSourceFiles(),
+    agent_configs: buildAgentConfigs(),
     edges: edges.value.filter(e => {
       const isInterContainer = nodes.value.some(n => 
         (n.type === 'container' && (e.source === n.id || e.target === n.id || 
@@ -1135,14 +1235,13 @@ async function onQueueDrop(event) {
   if (!selectedNode.value || selectedNode.value.type !== 'inputSource') return
   if (!selectedNode.value.data.files) selectedNode.value.data.files = []
   if (selectedNode.value.data.files.some(f => f.uid === data.uid)) return
-  // 异步加载内容
-  axios.get(`/api/projects/${props.projectId}/library/${data.uid}`)
-    .then(res => {
-      const content = res.data.content
-      const text = typeof content === 'string' ? content : (content.content || JSON.stringify(content, null, 2))
-      selectedNode.value.data.files.push({ name: data.name, content: text, uid: data.uid })
-    })
-    .catch(e => console.error('Failed to load document:', e))
+  // 加载内容
+  try {
+    const res = await axios.get(`/api/projects/${props.projectId}/library/${data.uid}`)
+    const content = res.data.content
+    const text = typeof content === 'string' ? content : (content.content || JSON.stringify(content, null, 2))
+    selectedNode.value.data.files.push({ name: data.name, content: text, uid: data.uid })
+  } catch (e) { console.error('Failed to load document:', e) }
 }
 
 // ── 容器子节点同步 ──
@@ -1226,7 +1325,7 @@ function addContainer() {
   nodes.value.push({
     id, type: 'container', position: { x: 250, y: 180 },
     data: {
-      name: '容器', label: '容器', icon: '📦',
+      name: '群聊', label: '群聊', icon: '👥',
       concurrency: 'serial', speaking_mode: 'ordered',
       repeat: 1, children: [], edges: [],
       context_layers: null, context_tokens: null,
@@ -1261,6 +1360,13 @@ function onNodeClick({ node }) {
   selectedNode.value = node
   if (node.type === 'expert') {
     customPrompt.value = node.data.customPrompt || ''
+    agentTagStop.value = node.data.agentTagStop !== undefined ? node.data.agentTagStop : true
+    agentMaxRounds.value = node.data.agentMaxRounds || 3
+    agentOnMaxRounds.value = node.data.agentOnMaxRounds || 'accept_last'
+    agentBlockEveryNRounds.value = node.data.agentBlockEveryNRounds || 0
+    agentReadInput.value = node.data.agentReadInput !== undefined ? node.data.agentReadInput : true
+    agentReadReport.value = node.data.agentReadReport !== undefined ? node.data.agentReadReport : true
+    agentReadChatLog.value = node.data.agentReadChatLog || false
   } else if (node.type === 'container') {
     loadContainerConfig(node)
   } else if (node.type === 'inputSource') {
@@ -1280,6 +1386,12 @@ function onNodeDoubleClick({ node }) {
 }
 
 function openNodeChatTab(node) {
+  // 输出节点打开输出页面
+  if (node.type === 'output') {
+    window.open(`/output?projectId=${encodeURIComponent(props.projectId || '')}`, '_blank')
+    return
+  }
+
   let params = `projectId=${encodeURIComponent(props.projectId || '')}&nodeType=${encodeURIComponent(node.type)}`
   if (node.type === 'container') {
     params += `&containerId=${encodeURIComponent(node.id)}&name=${encodeURIComponent(node.data.name || '容器')}`
@@ -1290,8 +1402,6 @@ function openNodeChatTab(node) {
     if (node.parentNode) params += `&containerId=${encodeURIComponent(node.parentNode)}`
   } else if (node.type === 'inputSource') {
     params += `&name=${encodeURIComponent(node.data.label || '输入源')}`
-  } else if (node.type === 'output') {
-    params += `&name=${encodeURIComponent(node.data.label || '输出')}`
   }
   window.open(`/chat-popup?${params}`, '_blank')
 }

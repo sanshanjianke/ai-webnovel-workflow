@@ -186,6 +186,14 @@ function handleSSEEvent(type, data) {
       isRunning.value = false
       sessionStorage.removeItem('meetingRunning')
       pipelineOutput.value = data.output // 保存输出数据
+      // 持久化完整输出数据供输出页/查看页使用
+      if (data.objects) {
+        sessionStorage.setItem('pipelineOutput', JSON.stringify({
+          objects: data.objects,
+          projectId: projectId.value,
+          timestamp: new Date().toISOString()
+        }))
+      }
       // 向output节点发送输出文件列表
       if (data.output) {
         const nodeOutputs = data.output.node_outputs || data.output.nodeOutputs || {}
@@ -203,6 +211,80 @@ function handleSSEEvent(type, data) {
       break
     case 'level_start':
     case 'level_complete':
+      broadcast(type, normalizedData)
+      break
+    // ── v2 Agent 事件 ──
+    case 'pipeline_start_v2':
+      console.log(`[PIPELINE_V2] 开始, ${data.totalObjects} 对象, ${data.levels} 层级, 节点: ${data.nodes}`)
+      pipelineOutput.value = { v2: true, objects: data.objects || [] }
+      // 存储会议 ID 供反馈使用
+      if (data.meetingId) {
+        sessionStorage.setItem('lastMeetingId', data.meetingId)
+      }
+      broadcast(type, normalizedData)
+      break
+    case 'object_init':
+      console.log(`[PIPELINE_V2] 对象 ${data.objectName} 开始处理`)
+      broadcast(type, normalizedData)
+      break
+    case 'level_start_v2':
+      console.log(`[PIPELINE_V2] 层级 ${data.level}/${data.totalLevels}, 对象: ${data.objectName}`)
+      broadcast(type, normalizedData)
+      break
+    case 'agent_start':
+      console.log(`[AGENT] ${normalizedData.expertType} 开始 Agent 迭代, 对象: ${data.objectName}`)
+      broadcast(type, normalizedData)
+      break
+    case 'agent_round_start':
+      broadcast('agent_round_start', normalizedData)
+      break
+    case 'agent_chunk':
+      broadcast('chunk', { ...normalizedData, chunkType: data.chunkType, content: data.content })
+      break
+    case 'agent_round_complete':
+      broadcast('agent_round_complete', normalizedData)
+      break
+    case 'agent_complete':
+      console.log(`[AGENT] ${normalizedData.expertType} Agent 完成, 轮次: ${data.totalRounds}`)
+      broadcast(type, normalizedData)
+      break
+    case 'agent_error':
+      console.error(`[AGENT] ${data.nodeId} error:`, data.error)
+      broadcast(type, normalizedData)
+      break
+    case 'object_progress':
+      broadcast('object_progress', normalizedData)
+      break
+    case 'object_complete':
+      console.log(`[PIPELINE_V2] 对象 ${data.objectName} 完成, 状态: ${data.status}`)
+      broadcast(type, normalizedData)
+      break
+    // ── 群聊事件 ──
+    case 'group_chat_start':
+      console.log(`[GROUP] 群聊 ${data.nodeName || data.nodeId} 开始, 成员: ${data.members}`)
+      broadcast(type, normalizedData)
+      break
+    case 'group_chat_round_start':
+      broadcast('group_chat_round_start', normalizedData)
+      break
+    case 'group_chat_member_start':
+      broadcast('group_chat_member_start', normalizedData)
+      break
+    case 'group_chat_chunk':
+      broadcast('chunk', { ...normalizedData, chunkType: data.chunkType, content: data.content })
+      break
+    case 'group_chat_member_complete':
+      broadcast('group_chat_member_complete', normalizedData)
+      break
+    case 'group_chat_round_complete':
+      broadcast('group_chat_round_complete', normalizedData)
+      break
+    case 'group_chat_complete':
+      console.log(`[GROUP] 群聊完成, ${data.totalSpeeches} 次发言`)
+      broadcast(type, normalizedData)
+      break
+    case 'group_chat_error':
+      console.error(`[GROUP] ${data.nodeId}/${data.expertId} error:`, data.error)
       broadcast(type, normalizedData)
       break
     default:
