@@ -80,11 +80,12 @@
         <!-- 右栏：文件队列 + 报告预览 -->
         <div class="right-panel">
           <!-- 文件队列 -->
-          <div class="file-queue" v-if="fileQueue.length > 0 || pendingCount > 0">
+          <div class="file-queue">
             <div class="panel-header">
               📋 对象文件
               <span v-if="pendingCount > 0" class="queue-count">{{ pendingCount }}</span>
             </div>
+            <div v-if="fileQueue.length === 0 && pendingCount === 0" class="empty-hint small">暂无对象</div>
             <div v-for="(file, idx) in fileQueue" :key="idx" class="queue-item">
               <span class="file-icon-s">📄</span>
               <span class="queue-filename">{{ file.name }}</span>
@@ -320,7 +321,7 @@ function scrollDown() {
 // ── SSE 事件处理 ──
 function handleEvent(type, data, timestamp) {
   // 过滤：只处理匹配的事件，但全局事件（pipeline_start_v2, done等）不过滤
-  const globalTypes = ['pipeline_start_v2', 'pipeline_complete', 'done', 'running_state', 'output_files', 'queue_start', 'queue_complete']
+  const globalTypes = ['pipeline_start_v2', 'pipeline_complete', 'done', 'running_state', 'output_files', 'queue_start', 'queue_complete', 'object_init', 'object_complete', 'pipeline_state']
   const nodeScoped = !globalTypes.includes(type)
 
   if (nodeScoped && !matchesTarget(data)) return
@@ -332,33 +333,41 @@ function handleEvent(type, data, timestamp) {
     case 'pipeline_start_v2':
       meetingId.value = data.meetingId || data.meeting_id || ''
       objectInfo.value = { current: 0, total: data.totalObjects || 0 }
-      fileQueue.value = []
       queueProgress.value = { total: data.totalObjects || 0, done: 0 }
+      if (data.objects && Array.isArray(data.objects)) {
+        const allFiles = []
+        for (const obj of data.objects) {
+          if (obj.files && Array.isArray(obj.files)) {
+            for (const f of obj.files) {
+              allFiles.push({ name: f.path || f.name || '', size: 0 })
+            }
+          }
+        }
+        fileQueue.value = allFiles
+        pendingCount.value = data.totalObjects || 0
+      } else {
+        fileQueue.value = []
+        pendingCount.value = 0
+      }
       break
 
     // ── 对象事件 ──
     case 'object_init':
       objectInfo.value.current = (objectInfo.value.current || 0) + 1
       queueProgress.value.done = objectInfo.value.current - 1
-      // 文件队列由 queue_init 设置
       break
 
     case 'object_progress':
       statusTokens.value = data.totalFiles ? `${data.totalFiles} 文件` : ''
       if (data.files && Array.isArray(data.files)) {
         fileQueue.value = data.files
-          .filter(f => f.category === 'report')
           .map(f => ({ name: f.path || f.name || '', size: 0 }))
       }
       break
 
     case 'object_complete':
+      pendingCount.value = Math.max(0, pendingCount.value - 1)
       queueProgress.value.done = objectInfo.value.current
-      if (data.files && Array.isArray(data.files)) {
-        fileQueue.value = data.files
-          .filter(f => f.category === 'report')
-          .map(f => ({ name: f.path || f.name || '', size: 0 }))
-      }
       break
 
     // ── 文件队列 ──
@@ -652,6 +661,16 @@ function handleEvent(type, data, timestamp) {
 
     case 'running_state':
       isRunning.value = data.isRunning || false
+      break
+
+    case 'pipeline_state':
+      // Mid-pipeline sync: populate from saved v2 state
+      if (data.objects && Array.isArray(data.objects)) {
+        objectInfo.value = { current: 0, total: data.objects.length }
+        queueProgress.value = { total: data.objects.length, done: 0 }
+        fileQueue.value = data.objects.map(o => ({ name: o.name || o.id || '', size: 0 }))
+        pendingCount.value = data.objects.length
+      }
       break
 
     case 'queue_state':

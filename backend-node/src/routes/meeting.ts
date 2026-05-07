@@ -281,9 +281,11 @@ export function registerMeetingRoutes(app: Express): void {
         }
 
         // Create pipeline objects from queue files
-        const objects = finalQueueFiles.map((content: string, index: number) =>
-          createPipelineObject(`对象${index + 1}`, [{ path: `input_${index + 1}.txt`, content }])
-        );
+        const objects = finalQueueFiles.map((item: any, index: number) => {
+          const content = typeof item === 'string' ? item : item.content
+          const fileName = typeof item === 'string' ? `input_${index + 1}.txt` : (item.name || `input_${index + 1}.txt`)
+          return createPipelineObject(fileName.replace(/\.[^.]+$/, ''), [{ path: fileName, content }])
+        });
 
         for await (const event of engine.processQueue(
           objects,

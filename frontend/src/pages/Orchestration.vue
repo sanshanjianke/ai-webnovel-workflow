@@ -42,8 +42,10 @@ onMounted(() => {
   chatChannel = new BroadcastChannel('meeting-chat')
   chatChannel.onmessage = (event) => {
     if (event.data?.type === 'sync') {
-      const msgs = messageBuffer[event.data.targetId] || []
-      for (const m of msgs) {
+      const targetMsgs = messageBuffer[event.data.targetId] || []
+      const soloMsgs = messageBuffer['solo'] || []
+      const allMsgs = [...soloMsgs, ...targetMsgs]
+      for (const m of allMsgs) {
         // 使用JSON序列化/反序列化确保数据可克隆
         const plainMsg = JSON.parse(JSON.stringify(m))
         chatChannel.postMessage({ type: 'message', data: plainMsg, timestamp: m.timestamp })

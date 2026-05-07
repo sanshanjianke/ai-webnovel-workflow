@@ -297,7 +297,11 @@ export class ObjectPipelineEngine {
         meetingId: this.meetingId,
         nodes: allNodeIds,
         totalObjects: activeObjects.length,
-        objects: activeObjects.map(o => ({ id: o.id, name: o.name }))
+        objects: activeObjects.map(o => ({
+          id: o.id,
+          name: o.name,
+          files: o.files.map(f => ({ path: f.path, category: f.category, producer: f.producer }))
+        }))
       }
     };
 

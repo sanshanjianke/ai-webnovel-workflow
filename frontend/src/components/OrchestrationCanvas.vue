@@ -1209,7 +1209,7 @@ function clearCanvas() {
 function inputSourceFiles() {
   const srcNode = nodes.value.find(n => n.type === 'inputSource')
   if (srcNode && srcNode.data.files && srcNode.data.files.length > 0) {
-    return srcNode.data.files.map(f => f.content)
+    return srcNode.data.files.map(f => ({ name: f.name, content: f.content }))
   }
   return []
 }
