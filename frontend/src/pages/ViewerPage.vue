@@ -8,9 +8,6 @@
     </div>
 
     <div class="viewer-body">
-      <!-- 左栏：文档库 -->
-      <DocumentSidebar v-if="projectId" :projectId="projectId" class="viewer-library" />
-
       <!-- 中栏：聊天内容(上) + 产出文档(下) -->
       <div class="center-panel">
         <div class="chat-section">
@@ -85,7 +82,6 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
-import DocumentSidebar from '../components/library/DocumentSidebar.vue'
 import RoundCard from '../components/RoundCard.vue'
 
 const route = useRoute()

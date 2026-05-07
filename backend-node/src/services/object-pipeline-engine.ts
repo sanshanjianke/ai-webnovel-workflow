@@ -381,7 +381,24 @@ export class ObjectPipelineEngine {
       deleteCheckpoint(this.checkpointDir, this.meetingId);
     }
 
-    // pipeline_complete
+    // pipeline_complete — 从对象中提取产出文件
+    const nodeOutputs: Record<string, string> = {};
+    const reportFiles: string[] = [];
+    for (const obj of activeObjects) {
+      for (const f of obj.files) {
+        if (f.category === 'report' && f.content) {
+          const key = f.producer && f.producer !== 'input'
+            ? `${obj.name}_${f.producer}_${f.path}`
+            : `${obj.name}_${f.path}`;
+          nodeOutputs[key] = f.content;
+          reportFiles.push(f.path);
+        }
+      }
+    }
+    const meetingSummary = activeObjects.map(o =>
+      `## ${o.name}\n${o.files.filter(f => f.category === 'report').map(f => f.content).join('\n\n')}`
+    ).join('\n\n---\n\n');
+
     yield {
       type: 'pipeline_complete',
       data: {
@@ -393,10 +410,8 @@ export class ObjectPipelineEngine {
           }))
         })),
         output: {
-          nodeOutputs: {},
-          meetingSummary: activeObjects.map(o =>
-            `## ${o.name}\n${o.files.filter(f => f.category === 'report').map(f => f.content).join('\n\n')}`
-          ).join('\n\n---\n\n')
+          nodeOutputs,
+          meetingSummary
         }
       }
     };

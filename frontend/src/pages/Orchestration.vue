@@ -68,6 +68,8 @@ function onRun(config) {
   for (const key of Object.keys(messageBuffer)) delete messageBuffer[key]
   speechCount.value = 0
   isRunning.value = true
+  pipelineOutput.value = null
+  sessionStorage.removeItem('pipelineOutput')
   sessionStorage.setItem('meetingRunning', 'true')
   startMeeting(config)
 }

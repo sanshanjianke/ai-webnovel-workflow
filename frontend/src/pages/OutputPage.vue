@@ -23,9 +23,11 @@
         @dragleave.prevent="isDragOver = false"
         @drop.prevent="onDropZip"
       >
-        <div v-if="objects.length === 0 && !zipLoaded" class="drop-hint">
-          📂 拖入 ZIP 文件查看历史输出<br>
-          <small>或运行管道后自动显示</small>
+        <div v-if="objects.length === 0 && !zipLoaded" class="empty-state">
+          <div class="empty-icon">📦</div>
+          <h3>查看管道输出</h3>
+          <p class="empty-desc">拖入管道导出的 ZIP 文件查看历史输出</p>
+          <p class="empty-desc-sub">或运行管道后自动显示结果</p>
         </div>
 
         <!-- 对象列表 -->
@@ -170,7 +172,7 @@ async function onDropZip(event) {
       }
 
       if (!objDirs.has(objName)) {
-        objDirs.set(objName, { name: objName, files: [] })
+        objDirs.set(objName, { id: objName, name: objName, files: [], status: 'completed' })
       }
 
       const content = await entry.async('text')
@@ -272,6 +274,15 @@ onMounted(() => {
   line-height: 1.8;
 }
 .drop-hint small { font-size: 0.8rem; color: #bbb; }
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+}
+.empty-icon { font-size: 4rem; margin-bottom: 16px; }
+.empty-state h3 { font-size: 1.3rem; color: #555; margin-bottom: 8px; }
+.empty-desc { font-size: 1rem; color: #888; margin-bottom: 4px; }
+.empty-desc-sub { font-size: 0.85rem; color: #aaa; }
 
 .object-list {
   width: 100%;

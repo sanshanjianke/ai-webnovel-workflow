@@ -11,6 +11,7 @@
           <router-link :to="navLink('/l3')">L3</router-link>
           <router-link :to="navLink('/l4')">L4</router-link>
           <router-link :to="navLink('/library')">文档库</router-link>
+          <router-link :to="navLink('/output')" class="nav-output">查看输出</router-link>
           <router-link to="/settings">设置</router-link>
         </div>
       </div>
@@ -173,6 +174,18 @@ html, body {
 .nav-layers a.router-link-active {
   opacity: 1;
   background: #3498db;
+}
+
+.nav-layers a.nav-output {
+  background: rgba(39, 174, 96, 0.2);
+  border: 1px solid rgba(39, 174, 96, 0.3);
+}
+.nav-layers a.nav-output:hover {
+  background: rgba(39, 174, 96, 0.35);
+}
+.nav-layers a.nav-output.router-link-active {
+  background: #27ae60;
+  border-color: #27ae60;
 }
 
 .nav-controls {
