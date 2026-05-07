@@ -44,7 +44,7 @@ export abstract class BaseExpert implements Expert {
     const llm = getLLM();
     let fullContent = '';
 
-    for await (const chunk of llm.stream(prompt, { temperature })) {
+    for await (const chunk of llm.stream(prompt, { temperature, thinking: true, thinkingBudget: 10000 })) {
       if (chunk.type === 'content') {
         fullContent += chunk.content;
         yield { type: 'content', content: chunk.content };
