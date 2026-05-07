@@ -83,10 +83,10 @@
           <div class="file-queue">
             <div class="panel-header">
               📋 对象文件
-              <span v-if="pendingCount > 0" class="queue-count">{{ pendingCount }}</span>
+              <span v-if="fileQueue.length > 0" class="queue-count">{{ fileQueue.length }}</span>
             </div>
-            <div v-if="fileQueue.length === 0 && pendingCount === 0" class="empty-hint small">暂无对象</div>
-            <div v-for="(file, idx) in fileQueue" :key="idx" class="queue-item">
+            <div v-if="fileQueue.length === 0" class="empty-hint small">暂无对象</div>
+            <div v-for="(file, idx) in fileQueue" :key="idx" class="queue-item" @dblclick="previewContent(file)" :title="'双击查看内容'">
               <span class="file-icon-s">📄</span>
               <span class="queue-filename">{{ file.name }}</span>
               <span class="file-size-s" v-if="file.size">{{ formatSize(file.size) }}</span>
@@ -127,6 +127,20 @@
       <span v-if="roundInfo.current > 0">· 第 {{ roundInfo.current }}/{{ roundInfo.total }} 轮</span>
       <span v-if="statusTokens">· {{ statusTokens }} tokens</span>
       <span class="status-hint" v-if="isRunning">右键其他节点 → 打开聊天窗口查看</span>
+    </div>
+
+    <!-- 文件内容预览弹窗 -->
+    <div v-if="showPreview" class="preview-overlay" @click.self="closePreview">
+      <div class="preview-modal">
+        <div class="preview-header">
+          <span>📄 {{ previewFile?.name || '' }}</span>
+          <button class="btn btn-sm" @click="closePreview">✕ 关闭</button>
+        </div>
+        <div class="preview-body">
+          <div v-if="previewFile?.content" class="preview-content" v-html="renderMarkdown(previewFile.content)"></div>
+          <div v-else class="empty-hint">该文件暂无内容</div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -170,6 +184,8 @@ const waitingForUser = ref(false)
 const fileQueue = ref([])
 const pendingCount = ref(0)
 const queueProgress = ref({ total: 0, done: 0 })
+const showPreview = ref(false)
+const previewFile = ref(null)
 
 // 报告
 const currentReport = ref('')
@@ -208,6 +224,14 @@ function getIcon(expertType) {
   return icons[expertType] || '📄'
 }
 function renderMarkdown(text) { return text ? md.render(text) : '' }
+function previewContent(file) {
+  previewFile.value = file
+  showPreview.value = true
+}
+function closePreview() {
+  showPreview.value = false
+  previewFile.value = null
+}
 function formatTime(ts) { return ts ? new Date(ts).toLocaleTimeString('zh-CN') : '' }
 function formatSize(bytes) {
   if (!bytes) return '0 B'
@@ -334,21 +358,8 @@ function handleEvent(type, data, timestamp) {
       meetingId.value = data.meetingId || data.meeting_id || ''
       objectInfo.value = { current: 0, total: data.totalObjects || 0 }
       queueProgress.value = { total: data.totalObjects || 0, done: 0 }
-      if (data.objects && Array.isArray(data.objects)) {
-        const allFiles = []
-        for (const obj of data.objects) {
-          if (obj.files && Array.isArray(obj.files)) {
-            for (const f of obj.files) {
-              allFiles.push({ name: f.path || f.name || '', size: 0 })
-            }
-          }
-        }
-        fileQueue.value = allFiles
-        pendingCount.value = data.totalObjects || 0
-      } else {
-        fileQueue.value = []
-        pendingCount.value = 0
-      }
+      pendingCount.value = data.totalObjects || 0
+      fileQueue.value = []
       break
 
     // ── 对象事件 ──
@@ -361,7 +372,7 @@ function handleEvent(type, data, timestamp) {
       statusTokens.value = data.totalFiles ? `${data.totalFiles} 文件` : ''
       if (data.files && Array.isArray(data.files)) {
         fileQueue.value = data.files
-          .map(f => ({ name: f.path || f.name || '', size: 0 }))
+          .map(f => ({ name: f.path || f.name || '', size: 0, content: f.content || '' }))
       }
       break
 
@@ -408,6 +419,10 @@ function handleEvent(type, data, timestamp) {
       rounds.value = []
       currentReport.value = ''
       roundInfo.value = { current: 0, total: data.stopConfig?.maxRounds || 5 }
+      // 用当前对象的文件列表替换文件队列
+      fileQueue.value = (data.files && Array.isArray(data.files))
+        ? data.files.map(f => ({ name: f.path || '', size: 0, content: f.content || '' }))
+        : []
       scrollDown()
       break
 
@@ -435,6 +450,15 @@ function handleEvent(type, data, timestamp) {
       if (data.report) {
         currentReport.value = data.report
         currentReportName.value = data.reportFileName || `${currentExpert.value}意见.md`
+        // 每轮更新文件队列中的报告条目
+        const reportName = currentReportName.value
+        const existing = fileQueue.value.findIndex(f => f.name === reportName)
+        const entry = { name: reportName, size: 0, content: data.report }
+        if (existing >= 0) {
+          fileQueue.value[existing] = entry
+        } else {
+          fileQueue.value.push(entry)
+        }
       }
       break
     }
@@ -481,6 +505,10 @@ function handleEvent(type, data, timestamp) {
           id: m, name: m, icon: getIcon(m)
         }))
       }
+      // 用当前对象的文件列表替换文件队列
+      fileQueue.value = (data.files && Array.isArray(data.files))
+        ? data.files.map(f => ({ name: f.path || '', size: 0, content: f.content || '' }))
+        : []
       scrollDown()
       break
 
@@ -664,11 +692,10 @@ function handleEvent(type, data, timestamp) {
       break
 
     case 'pipeline_state':
-      // Mid-pipeline sync: populate from saved v2 state
+      // Mid-pipeline sync: restore progress counts
       if (data.objects && Array.isArray(data.objects)) {
         objectInfo.value = { current: 0, total: data.objects.length }
         queueProgress.value = { total: data.objects.length, done: 0 }
-        fileQueue.value = data.objects.map(o => ({ name: o.name || o.id || '', size: 0 }))
         pendingCount.value = data.objects.length
       }
       break
@@ -820,8 +847,9 @@ onUnmounted(() => {
   font-size: 0.78rem;
   border-radius: 4px;
   margin-bottom: 2px;
+  cursor: pointer;
 }
-.queue-item:hover { background: #f0f0f0; }
+.queue-item:hover { background: #e8f4fd; }
 .queue-filename {
   flex: 1;
   overflow: hidden;
@@ -957,4 +985,43 @@ onUnmounted(() => {
 
 /* ── 动画 ── */
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+/* ── 内容预览弹窗 ── */
+.preview-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.preview-modal {
+  background: white;
+  border-radius: 10px;
+  width: 70vw;
+  max-width: 900px;
+  height: 75vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+.preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid #e0e0e0;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.preview-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px;
+}
+.preview-content {
+  line-height: 1.8;
+  font-size: 0.9rem;
+}
 </style>

@@ -300,7 +300,7 @@ export class ObjectPipelineEngine {
         objects: activeObjects.map(o => ({
           id: o.id,
           name: o.name,
-          files: o.files.map(f => ({ path: f.path, category: f.category, producer: f.producer }))
+          files: o.files.map(f => ({ path: f.path, category: f.category, producer: f.producer, content: f.content }))
         }))
       }
     };

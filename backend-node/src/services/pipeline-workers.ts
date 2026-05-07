@@ -98,7 +98,8 @@ async function processAgentNode(
       nodeId,
       objectId: obj.id,
       objectName: obj.name,
-      stopConfig
+      stopConfig,
+      files: obj.files.map(f => ({ path: f.path, category: f.category, producer: f.producer, content: f.content }))
     }
   });
 
@@ -117,6 +118,21 @@ async function processAgentNode(
           objectName: obj.name
         }
       });
+
+      if (agentEvent.type === 'agent_round_complete') {
+        // 每轮完成后发一次 object_progress，让前端文件队列即时更新
+        const roundReport = (agentEvent.data.report as string) || '';
+        const currentFiles = [
+          ...obj.files.map(f => ({ path: f.path, category: f.category, producer: f.producer, content: f.content })),
+        ];
+        if (roundReport) {
+          currentFiles.push({ path: `${expert.expertType}意见.md`, category: 'report', producer: expert.expertId, content: roundReport });
+        }
+        emit({
+          type: 'object_progress',
+          data: { objectId: obj.id, objectName: obj.name, nodeId, totalFiles: currentFiles.length, files: currentFiles }
+        });
+      }
 
       if (agentEvent.type === 'agent_complete') {
         const report = (agentEvent.data.report as string) || '';
@@ -141,7 +157,7 @@ async function processAgentNode(
       objectName: obj.name,
       nodeId,
       totalFiles: obj.files.length,
-      files: obj.files.map(f => ({ path: f.path, category: f.category, producer: f.producer }))
+      files: obj.files.map(f => ({ path: f.path, category: f.category, producer: f.producer, content: f.content }))
     }
   });
 }
@@ -174,7 +190,8 @@ async function processGroupChatNode(
       speakingMode,
       exitMode,
       objectId: obj.id,
-      objectName: obj.name
+      objectName: obj.name,
+      files: obj.files.map(f => ({ path: f.path, category: f.category, producer: f.producer, content: f.content }))
     }
   });
 
@@ -379,7 +396,7 @@ async function processGroupChatNode(
       objectName: obj.name,
       nodeId,
       totalFiles: obj.files.length,
-      files: obj.files.map(f => ({ path: f.path, category: f.category, producer: f.producer }))
+      files: obj.files.map(f => ({ path: f.path, category: f.category, producer: f.producer, content: f.content }))
     }
   });
 }
