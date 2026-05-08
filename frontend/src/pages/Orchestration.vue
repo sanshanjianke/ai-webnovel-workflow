@@ -275,7 +275,7 @@ function handleSSEEvent(type, data) {
       broadcast('group_chat_member_start', normalizedData)
       break
     case 'group_chat_chunk':
-      broadcast('chunk', { ...normalizedData, chunkType: data.chunkType, content: data.content })
+      broadcast('group_chat_chunk', { ...normalizedData, chunkType: data.chunkType, content: data.content })
       break
     case 'group_chat_member_complete':
       broadcast('group_chat_member_complete', normalizedData)

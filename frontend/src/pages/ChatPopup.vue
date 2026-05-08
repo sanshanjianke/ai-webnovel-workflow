@@ -47,8 +47,8 @@
         </div>
       </div>
 
-      <!-- 专家和群聊节点：三栏布局 -->
-      <template v-else>
+      <!-- 专家节点：三栏布局 -->
+      <template v-else-if="nodeType === 'expert'">
         <!-- 中栏：迭代日志 + 输入框 -->
         <div class="center-panel">
           <div class="chat-messages" ref="msgEl">
@@ -96,15 +96,6 @@
             </div>
           </div>
 
-          <!-- 群聊成员列表 -->
-          <div class="group-members" v-if="nodeType === 'container' && groupMembers.length > 0">
-            <div class="panel-header">👥 群聊成员</div>
-            <div v-for="m in groupMembers" :key="m.id" class="member-item">
-              <span>{{ m.icon }}</span>
-              <span>{{ m.name }}</span>
-            </div>
-          </div>
-
           <!-- 报告预览 -->
           <div class="report-preview">
             <div class="panel-header">📝 产出报告</div>
@@ -118,15 +109,33 @@
           </div>
         </div>
       </template>
+
+      <!-- 群聊节点：委托给 GroupChatView -->
+      <GroupChatView
+        v-else-if="nodeType === 'container'"
+        :target-id="targetId"
+        :project-id="projectId"
+        :node-name="title"
+        @status="onGroupStatus"
+      />
     </div>
 
     <!-- 状态栏 -->
     <div class="status-bar" v-if="nodeType !== 'inputSource' && nodeType !== 'output'">
-      <span v-if="objectInfo.current > 0">对象 {{ objectInfo.current }}/{{ objectInfo.total }}</span>
-      <span v-if="currentExpert">· {{ currentExpert }}</span>
-      <span v-if="roundInfo.current > 0">· 第 {{ roundInfo.current }}/{{ roundInfo.total }} 轮</span>
-      <span v-if="statusTokens">· {{ statusTokens }} tokens</span>
-      <span class="status-hint" v-if="isRunning">右键其他节点 → 打开聊天窗口查看</span>
+      <template v-if="nodeType === 'container'">
+        <span v-if="objectInfo.current > 0">对象 {{ objectInfo.current }}/{{ objectInfo.total }}</span>
+        <span v-if="groupStatus.currentExpert">· {{ groupStatus.currentExpert }}</span>
+        <span v-if="groupStatus.roundCurrent > 0">· 第 {{ groupStatus.roundCurrent }} 轮</span>
+        <span v-if="groupStatus.isRunning" class="popup-status running">● 运行中</span>
+        <span v-else class="popup-status stopped">已完成</span>
+      </template>
+      <template v-else>
+        <span v-if="objectInfo.current > 0">对象 {{ objectInfo.current }}/{{ objectInfo.total }}</span>
+        <span v-if="currentExpert">· {{ currentExpert }}</span>
+        <span v-if="roundInfo.current > 0">· 第 {{ roundInfo.current }}/{{ roundInfo.total }} 轮</span>
+        <span v-if="statusTokens">· {{ statusTokens }} tokens</span>
+        <span class="status-hint" v-if="isRunning">右键其他节点 → 打开聊天窗口查看</span>
+      </template>
     </div>
 
     <!-- 文件内容预览弹窗 -->
@@ -151,6 +160,7 @@ import { useRoute } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import DocumentSidebar from '../components/library/DocumentSidebar.vue'
 import RoundCard from '../components/RoundCard.vue'
+import GroupChatView from '../components/GroupChatView.vue'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import axios from 'axios'
@@ -196,15 +206,16 @@ const objectInfo = ref({ current: 0, total: 0 })
 const roundInfo = ref({ current: 0, total: 0 })
 const statusTokens = ref('')
 
-// 群聊
-const groupMembers = ref([])
-
 // 输出节点（复用旧逻辑）
 const inputFiles = ref([])
 const outputFiles = ref([])
 
 // 会议ID（从 SSE 获取）
 const meetingId = ref('')
+
+// 群聊状态（从 GroupChatView 回传）
+const groupStatus = ref({ currentExpert: '', roundCurrent: 0, roundTotal: 0, isRunning: false })
+function onGroupStatus(s) { groupStatus.value = s }
 
 let channel = null
 
@@ -492,94 +503,7 @@ function handleEvent(type, data, timestamp) {
       scrollDown()
       break
 
-    // ── 群聊事件 ──
-    case 'group_chat_start':
-      currentExpert.value = data.nodeName || data.nodeId || '群聊'
-      currentExpertId.value = data.nodeId || ''
-      currentRoundNum = 0
-      rounds.value = []
-      currentReport.value = ''
-      // 设置群聊成员列表
-      if (data.members) {
-        groupMembers.value = (Array.isArray(data.members) ? data.members : []).map(m => ({
-          id: m, name: m, icon: getIcon(m)
-        }))
-      }
-      // 用当前对象的文件列表替换文件队列
-      fileQueue.value = (data.files && Array.isArray(data.files))
-        ? data.files.map(f => ({ name: f.path || '', size: 0, content: f.content || '' }))
-        : []
-      scrollDown()
-      break
-
-    case 'group_chat_round_start':
-      currentRoundNum = data.round || (currentRoundNum + 1)
-      // 群聊轮次作为标记消息
-      rounds.value.push({
-        round: currentRoundNum,
-        messages: [{ role: 'system', content: `👥 第${currentRoundNum}轮讨论`, timestamp: ts }],
-        streaming: true,
-        startedAt: ts,
-        completedAt: null
-      })
-      scrollDown()
-      break
-
-    case 'group_chat_member_start': {
-      // 创建此成员的发言轮次
-      const speakerType = data.expertType || data.expert_id || ''
-      const memberRound = {
-        round: rounds.value.length + 1,
-        messages: [{
-          role: 'assistant',
-          thinking: '',
-          content: '',
-          timestamp: ts,
-          speakerName: speakerType,
-          speakerIcon: getIcon(speakerType)
-        }],
-        streaming: true,
-        startedAt: ts,
-        completedAt: null,
-        isGroupChat: true,
-        speakerName: speakerType
-      }
-      rounds.value.push(memberRound)
-      scrollDown()
-      break
-    }
-
-    case 'group_chat_member_complete': {
-      const cr3 = currentRound()
-      if (cr3) {
-        cr3.streaming = false
-        cr3.completedAt = ts
-      }
-      break
-    }
-
-    case 'group_chat_round_complete':
-      // 标记最后一个 streaming round 完成
-      if (rounds.value.length > 0) {
-        rounds.value[rounds.value.length - 1].streaming = false
-      }
-      break
-
-    case 'group_chat_complete':
-      currentRoundNum = 0
-      rounds.value = []
-      break
-
-    case 'group_chat_error': {
-      const cr4 = currentRound()
-      if (cr4) {
-        cr4.messages.push({ role: 'system', content: `❌ ${data.expertId || ''}: ${data.error || '群聊错误'}`, timestamp: ts })
-        cr4.streaming = false
-      }
-      break
-    }
-
-    // ── Chunk (v1/v2 agent 和群聊共用) ──
+    // ── Chunk (v1/v2 agent) ──
     case 'chunk': {
       const chunkType = data.chunk_type || data.chunkType
       const chunkContent = data.content || ''
@@ -817,7 +741,7 @@ onUnmounted(() => {
 }
 
 /* ── 右栏面板 ── */
-.file-queue, .group-members, .report-preview {
+.file-queue, .report-preview {
   padding: 10px 12px;
   border-bottom: 1px solid #e8e8e8;
 }
@@ -864,14 +788,6 @@ onUnmounted(() => {
   margin-top: 6px;
   padding-top: 6px;
   border-top: 1px dashed #ddd;
-}
-
-.group-members .member-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 6px;
-  font-size: 0.78rem;
 }
 
 .report-preview { flex: 1; display: flex; flex-direction: column; }

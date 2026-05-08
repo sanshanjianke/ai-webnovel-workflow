@@ -340,41 +340,28 @@ async function processGroupChatNode(
     roundNum++;
   }
 
-  // 持久化群聊产出
-  for (const expertId of children) {
-    const role = childrenRoles.get(expertId) || ExpertRole.MAIN;
-    const expert = createExpert(expertId, role, state.globalConfig.granularity);
-    const mySpeeches = groupChatLog.rounds
-      .flatMap(r => r.speeches)
-      .filter(s => s.expertId === expertId);
+  // 持久化群聊产出 — 合并为一份共享报告
+  const containerName = cc.name || nodeId;
+  const allSpeeches = groupChatLog.rounds.flatMap(r => r.speeches);
 
-    const finalContent = mySpeeches.map(s => s.content).join('\n\n---\n\n');
-    const report = finalContent || '';
+  const combinedReport = allSpeeches.length > 0
+    ? allSpeeches.map(s => `## ${s.expertType}\n\n${s.content}`).join('\n\n---\n\n')
+    : '';
 
-    const chatLog: ExpertChatLog = {
-      expertId,
-      expertType: expert.expertType,
-      objectId: obj.id,
-      reportFile: `${expert.expertType}_群聊报告.md`,
-      startedAt: new Date().toISOString(),
-      completedAt: new Date().toISOString(),
-      rounds: groupChatLog.rounds.map(r => ({
-        round: r.round,
-        messages: r.speeches
-          .filter(s => s.expertId === expertId)
-          .map(s => ({
-            role: 'assistant' as const,
-            thinking: s.thinking,
-            content: s.content,
-            timestamp: s.timestamp
-          })),
-        completedAt: new Date().toISOString()
-      }))
-    };
+  state.outputSeq.value++;
+  obj.files.push({
+    path: `${containerName}_群聊_report.md`,
+    content: combinedReport,
+    producer: nodeId,
+    category: 'report'
+  });
 
-    addExpertOutput(obj, expertId, expert.expertType, report, chatLog, state.outputSeq.value);
-    state.outputSeq.value++;
-  }
+  obj.files.push({
+    path: `${containerName}_群聊_chatlog.json`,
+    content: JSON.stringify(groupChatLog, null, 2),
+    producer: nodeId,
+    category: 'chat_log'
+  });
 
   emit({
     type: 'group_chat_complete',
