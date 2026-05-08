@@ -18,7 +18,7 @@
   "self_review_prompt": "请审视上一轮的意见，检查逻辑漏洞、考虑不周或表述不清之处。如有问题请修正。\n定稿时请在最终意见外包裹<报告>...</报告>标签。如果认为无需再修正，请输出<stop>。",
   "suggestion_patterns": ["卷.*\\d+", "第.*章", "场景|\\*\\*场景"],
   "agent_defaults": {
-    "enableTagStop": true,
+    "enableStopSignal": true,
     "blockEveryNRounds": 0,
     "maxRounds": 5,
     "onMaxRounds": "accept_last"

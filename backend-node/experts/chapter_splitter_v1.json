@@ -18,7 +18,7 @@
   "self_review_prompt": "请审视上一轮的拆分方案，章节间的因果链是否完整？是否有冗余或遗漏的章节？\n定稿时请在最终意见外包裹<报告>...</报告>标签。如果认为无需再修正，请输出<stop>。",
   "suggestion_patterns": ["第.*章.*：", "核心事件", "情绪基调"],
   "agent_defaults": {
-    "enableTagStop": true,
+    "enableStopSignal": true,
     "blockEveryNRounds": 0,
     "maxRounds": 5,
     "onMaxRounds": "accept_last"

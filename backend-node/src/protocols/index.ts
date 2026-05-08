@@ -426,7 +426,7 @@ export interface ExpertDefinition {
 // ============ Agent 中止条件 ============
 
 export interface AgentStopConfig {
-  enableTagStop: boolean;
+  enableStopSignal: boolean;
   blockEveryNRounds: number;    // 0 = disabled
   maxRounds: number;
   onMaxRounds: 'accept_last' | 'pick_best';

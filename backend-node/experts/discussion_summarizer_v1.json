@@ -18,7 +18,7 @@
   "self_review_prompt": "请审视上一轮的总结，是否准确反映了讨论内容？是否有遗漏的关键分歧？\n定稿时请在最终意见外包裹<报告>...</报告>标签。如果认为无需再修正，请输出<stop>。",
   "suggestion_patterns": ["共识", "分歧"],
   "agent_defaults": {
-    "enableTagStop": true,
+    "enableStopSignal": true,
     "blockEveryNRounds": 0,
     "maxRounds": 3,
     "onMaxRounds": "accept_last"

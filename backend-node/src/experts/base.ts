@@ -311,12 +311,12 @@ export abstract class BaseExpert implements Expert {
       }
 
       // ---- <stop> 标签检测 ----
-      if (stopConfig.enableTagStop && hasStopTag(fullContent)) {
+      if (stopConfig.enableStopSignal && hasStopSignal(fullContent)) {
         yield {
           type: 'agent_round_complete',
           data: {
             expertId: this.expertId, round,
-            stoppedBy: 'tag', report: finalReport
+            stoppedBy: 'stop', report: finalReport
           }
         };
         stopRequested = true;
@@ -388,7 +388,7 @@ export function extractReport(content: string): string {
 /**
  * 检查内容是否包含 <stop> 标签（大小写不敏感）。
  */
-export function hasStopTag(content: string): boolean {
+export function hasStopSignal(content: string): boolean {
   return /<stop>/i.test(content);
 }
 

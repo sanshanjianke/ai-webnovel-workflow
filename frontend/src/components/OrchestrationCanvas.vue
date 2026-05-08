@@ -276,8 +276,8 @@
         </div>
         <div class="config-field config-inline">
           <label class="checkbox-label">
-            <input type="checkbox" v-model="agentTagStop" @change="onAgentConfigChange" />
-            标签中止 (&lt;stop&gt;)
+            <input type="checkbox" v-model="agentStopSignal" @change="onAgentConfigChange" />
+            &lt;stop&gt; 中止
           </label>
         </div>
         <div class="config-field">
@@ -547,7 +547,7 @@ const customPrompt = ref('')
 const importInput = ref(null)
 
 // Agent 迭代配置 (v2)
-const agentTagStop = ref(true)
+const agentStopSignal = ref(true)
 const agentMaxRounds = ref(3)
 const agentOnMaxRounds = ref('accept_last')
 const agentBlockEveryNRounds = ref(0)
@@ -1042,7 +1042,7 @@ function onConfigChange() {
 
 function onAgentConfigChange() {
   if (!selectedNode.value || selectedNode.value.type !== 'expert') return
-  selectedNode.value.data.agentTagStop = agentTagStop.value
+  selectedNode.value.data.agentStopSignal = agentStopSignal.value
   selectedNode.value.data.agentMaxRounds = agentMaxRounds.value
   selectedNode.value.data.agentOnMaxRounds = agentOnMaxRounds.value
   selectedNode.value.data.agentBlockEveryNRounds = agentBlockEveryNRounds.value
@@ -1220,7 +1220,7 @@ function buildSingleAgentConfig(data) {
   if (data.agentReadChatLog) readCategories.push('chat_log')
   return {
     stopConfig: {
-      enableTagStop: data.agentTagStop !== undefined ? data.agentTagStop : true,
+      enableStopSignal: data.agentStopSignal !== undefined ? data.agentStopSignal : true,
       blockEveryNRounds: data.agentBlockEveryNRounds || 0,
       maxRounds: data.agentMaxRounds || 3,
       onMaxRounds: data.agentOnMaxRounds || 'accept_last'
@@ -1463,7 +1463,7 @@ function onNodeClick({ node }) {
   selectedNode.value = node
   if (node.type === 'expert') {
     customPrompt.value = node.data.customPrompt || ''
-    agentTagStop.value = node.data.agentTagStop !== undefined ? node.data.agentTagStop : true
+    agentStopSignal.value = node.data.agentStopSignal !== undefined ? node.data.agentStopSignal : true
     agentMaxRounds.value = node.data.agentMaxRounds || 3
     agentOnMaxRounds.value = node.data.agentOnMaxRounds || 'accept_last'
     agentBlockEveryNRounds.value = node.data.agentBlockEveryNRounds || 0

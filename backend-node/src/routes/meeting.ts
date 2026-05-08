@@ -109,7 +109,7 @@ export function registerMeetingRoutes(app: Express): void {
         self_review_prompt: '请审视并修正你的意见。定稿时请包裹在<报告>...</报告>中。',
         suggestion_patterns: [],
         agent_defaults: {
-          enableTagStop: true,
+          enableStopSignal: true,
           blockEveryNRounds: 0,
           maxRounds: 3,
           onMaxRounds: 'accept_last'

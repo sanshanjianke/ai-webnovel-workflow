@@ -18,7 +18,7 @@
   "self_review_prompt": "请审视上一轮的市场分析，是否有遗漏的商业风险？是否有被忽略的读者群体？\n定稿时请在最终意见外包裹<报告>...</报告>标签。如果认为无需再修正，请输出<stop>。",
   "suggestion_patterns": ["爽点", "毒点|劝退", "节奏"],
   "agent_defaults": {
-    "enableTagStop": true,
+    "enableStopSignal": true,
     "blockEveryNRounds": 0,
     "maxRounds": 5,
     "onMaxRounds": "accept_last"

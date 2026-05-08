@@ -18,7 +18,7 @@
   "self_review_prompt": "请审视上一轮的分析，是否有遗漏的逻辑漏洞？是否有结构盲区？\n定稿时请在最终意见外包裹<报告>...</报告>标签。如果认为无需再修正，请输出<stop>。",
   "suggestion_patterns": ["第.*章", "序列|功能", "因果|逻辑"],
   "agent_defaults": {
-    "enableTagStop": true,
+    "enableStopSignal": true,
     "blockEveryNRounds": 0,
     "maxRounds": 5,
     "onMaxRounds": "accept_last"

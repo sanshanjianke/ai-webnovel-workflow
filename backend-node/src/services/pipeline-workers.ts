@@ -41,7 +41,7 @@ export interface WorkerSharedState {
 }
 
 export const DEFAULT_STOP_CONFIG: AgentStopConfig = {
-  enableTagStop: true,
+  enableStopSignal: true,
   blockEveryNRounds: 0,
   maxRounds: 3,
   onMaxRounds: 'accept_last'

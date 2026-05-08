@@ -18,7 +18,7 @@
   "self_review_prompt": "请审视上一轮的意见，是否有读者角度遗漏的感受？是否有过度解读的风险？\n定稿时请在最终意见外包裹<报告>...</报告>标签。如果认为无需再修正，请输出<stop>。",
   "suggestion_patterns": ["疲劳", "不合理|困惑", "弃书|骂|劝退"],
   "agent_defaults": {
-    "enableTagStop": true,
+    "enableStopSignal": true,
     "blockEveryNRounds": 0,
     "maxRounds": 5,
     "onMaxRounds": "accept_last"
