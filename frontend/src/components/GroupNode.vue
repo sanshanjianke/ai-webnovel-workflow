@@ -12,11 +12,24 @@
       </div>
       <button class="container-resize" @mousedown.stop="startResize" title="拖拽调整大小">⟲</button>
     </div>
-    <div class="container-body">
+    <div
+      class="container-body"
+      :class="{ 'clickable-body': hasPendingExpert }"
+      @click="onClickBody"
+      :title="hasPendingExpert ? '点击添加选中的专家' : '先在左侧选择专家'"
+    >
       <slot />
-      <div v-if="children.length === 0" class="container-empty">拖拽专家到这里</div>
-      <div v-else class="container-children-list">
-        <span v-for="(child, idx) in children" :key="idx" class="container-child-tag">{{ child }}</span>
+      <div v-if="experts.length === 0" class="container-empty-placeholder">
+        <span>{{ hasPendingExpert ? '点击这里添加专家' : '在左侧选择专家后点击这里' }}</span>
+      </div>
+      <div v-else class="container-expert-cards">
+        <div v-for="(expert, idx) in experts" :key="idx" class="expert-card">
+          <span class="expert-card-num">{{ idx + 1 }}</span>
+          <span class="expert-card-icon">{{ expert.icon || '📄' }}</span>
+          <span class="expert-card-label">{{ expert.label }}</span>
+          <span class="expert-card-role">{{ roleLabel(expert.role) }}</span>
+          <button class="expert-card-remove" @click.stop="removeExpert(idx)" title="移除此专家">×</button>
+        </div>
       </div>
     </div>
     <Handle type="target" :position="Position.Left" class="container-handle-in" />
@@ -25,7 +38,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
 
 const props = defineProps({
@@ -33,9 +46,21 @@ const props = defineProps({
   selected: { type: Boolean }
 })
 
-const children = computed(() => props.data.children || [])
-const width = ref(props.data.width || 500)
-const height = ref(props.data.height || 280)
+const experts = computed(() => props.data.experts || [])
+const hasPendingExpert = computed(() => !!(props.data._pendingExpert))
+
+const defaultW = props.data.width || 500
+const defaultH = props.data.height || 280
+const width = ref(defaultW)
+const height = ref(defaultH)
+
+watch(experts, () => {
+  const autoH = 180 + experts.value.length * 62
+  if (experts.value.length > 0) {
+    height.value = Math.max(defaultH, autoH)
+    if (props.data.onResize) props.data.onResize({ width: width.value, height: height.value })
+  }
+}, { deep: true })
 
 const containerStyle = computed(() => ({
   width: `${width.value}px`,
@@ -61,6 +86,21 @@ function startResize(e) {
   }
   document.addEventListener('mousemove', onMove)
   document.addEventListener('mouseup', onUp)
+}
+
+function onClickBody() {
+  if (props.data.onClickBody) props.data.onClickBody()
+}
+
+function removeExpert(index) {
+  if (props.data.onRemoveExpert) {
+    props.data.onRemoveExpert(index)
+  }
+}
+
+function roleLabel(role) {
+  const labels = { main: '主导', review: '审核', supplement: '补充' }
+  return labels[role] || role
 }
 </script>
 
@@ -113,43 +153,112 @@ function startResize(e) {
   padding: 2px 4px;
 }
 .container-resize:hover { color: #888; }
+
+/* 拖放目标区域 */
 .container-body {
   min-height: 60px;
   padding: 8px;
   position: relative;
+  transition: background 0.2s, box-shadow 0.2s;
+  border-radius: 0 0 10px 10px;
 }
-.container-empty {
-  color: rgba(0,0,0,0.08);
-  font-size: 0.8rem;
-  text-align: center;
-  padding: 20px;
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  user-select: none;
+.container-body.clickable-body {
+  cursor: pointer;
+  background: rgba(52, 152, 219, 0.04);
+  box-shadow: inset 0 0 0 2px rgba(52, 152, 219, 0.25);
 }
-.container-children-list {
+.container-body.clickable-body:hover {
+  background: rgba(52, 152, 219, 0.1);
+  box-shadow: inset 0 0 0 2px #3498db;
+}
+
+/* 空状态 */
+.container-empty-placeholder {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 4px;
-  position: absolute;
-  bottom: 6px;
-  left: 8px;
-  right: 8px;
-  pointer-events: none;
+  align-items: center;
+  justify-content: center;
+  min-height: 60px;
+  color: rgba(0, 0, 0, 0.12);
+  font-size: 0.85rem;
   user-select: none;
+  pointer-events: none;
 }
-.container-child-tag {
+
+/* 专家卡片垂直排列 */
+.container-expert-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0;
+}
+.expert-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #e8e0f0;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  transition: box-shadow 0.15s;
+}
+.expert-card:hover {
+  box-shadow: 0 2px 8px rgba(155, 89, 182, 0.12);
+}
+.expert-card-num {
+  background: #9b59b6;
+  color: white;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 0.7rem;
-  color: rgba(0,0,0,0.18);
-  background: rgba(0,0,0,0.03);
-  padding: 2px 8px;
-  border-radius: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.expert-card-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+.expert-card-label {
+  font-weight: 600;
+  color: #333;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
+.expert-card-role {
+  font-size: 0.65rem;
+  color: #888;
+  background: #f5f5f5;
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.expert-card-remove {
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #bbb;
+  font-size: 1rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.expert-card-remove:hover {
+  background: #fee;
+  color: #e74c3c;
+}
+
+/* handles */
 .container-handle-in { width: 10px; height: 10px; background: #9b59b6; border: 2px solid white; }
 .container-handle-out { width: 10px; height: 10px; background: #9b59b6; border: 2px solid white; }
 </style>

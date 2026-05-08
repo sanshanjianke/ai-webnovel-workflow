@@ -20,7 +20,9 @@
         <div v-show="builtinOpen">
           <div v-for="(expert, id) in availableExperts" :key="id"
             class="toolbox-item"
+            :class="{ 'toolbox-item-selected': selectedExpert && selectedExpert.expertId === id }"
             draggable="true"
+            @click="selectExpert(id, expert)"
             @dragstart="onDragStart($event, id, expert)"
             @contextmenu.prevent.stop="showExpertContext($event, id, expert, true)"
           >
@@ -39,7 +41,9 @@
         <div v-show="customOpen">
           <div v-for="(expert, id) in customExperts" :key="id"
             class="toolbox-item custom-item"
+            :class="{ 'toolbox-item-selected': selectedExpert && selectedExpert.expertId === id }"
             draggable="true"
+            @click="selectExpert(id, expert)"
             @dragstart="onDragStart($event, id, expert)"
             @contextmenu.prevent.stop="showExpertContext($event, id, expert, false)"
           >
@@ -553,6 +557,28 @@ const agentReadChatLog = ref(false)
 
 const customExperts = ref({})
 
+// ── 侧边栏选择专家 ──
+const selectedExpert = ref(null)  // { expertId, label, icon } 或 null
+
+function selectExpert(id, expert) {
+  if (selectedExpert.value && selectedExpert.value.expertId === id) {
+    selectedExpert.value = null  // 再次点击取消选择
+  } else {
+    selectedExpert.value = { expertId: id, label: expert.label, icon: expert.icon, role: 'main' }
+  }
+}
+
+function clearSelectedExpert() {
+  selectedExpert.value = null
+}
+
+// 同步选中专家到所有容器的 _pendingExpert
+watch(selectedExpert, (val) => {
+  for (const n of nodes.value) {
+    if (n.type === 'container') n.data._pendingExpert = val
+  }
+})
+
 // ── 输入源队列 ──
 const showQueuePanel = ref(false)
 const queueFiles = ref([])
@@ -615,7 +641,7 @@ const containerCfg = reactive({
 
 const containerChildren = computed(() => {
   if (!selectedNode.value || selectedNode.value.type !== 'container') return []
-  return selectedNode.value.data.children || []
+  return (selectedNode.value.data.experts || []).map(e => e.expertId)
 })
 
 let nodeCounter = 0
@@ -911,6 +937,29 @@ function onDrop(event) {
   const rect = canvasEl.getBoundingClientRect()
   const x = event.clientX - rect.left
   const y = event.clientY - rect.top
+
+  // 检测是否落入某个容器内
+  const containerEls = canvasEl.querySelectorAll('.vue-flow__node-container')
+  for (const el of containerEls) {
+    const cr = el.getBoundingClientRect()
+    const cx = cr.left - rect.left
+    const cy = cr.top - rect.top
+    if (x >= cx && x <= cx + cr.width && y >= cy && y <= cy + cr.height) {
+      // 找到对应容器节点
+      const containerId = el.getAttribute('data-id')
+      const containerNode = nodes.value.find(n => n.id === containerId)
+      if (containerNode && containerNode.data.onAddExpert) {
+        containerNode.data.onAddExpert({
+          expertId: data.expertId,
+          label: data.label,
+          icon: data.icon || '📄',
+          role: 'main'
+        })
+      }
+      return
+    }
+  }
+
   const id = `node_${++nodeCounter}`
   nodes.value.push({
     id, type: 'expert', position: { x, y },
@@ -942,6 +991,29 @@ async function loadDesignByUid(uid) {
     nodeCounter = nodes.value.length
     activePreset.value = 'custom'
     selectedNode.value = null
+    // 重新附加容器回调（不可序列化）
+    for (const n of nodes.value) {
+      if (n.type === 'container') {
+        if (!n.data.experts) n.data.experts = []
+        n.data._pendingExpert = null
+        const cid = n.id
+        n.data.onAddExpert = function(expert) {
+          const node = nodes.value.find(nn => nn.id === cid)
+          if (node) node.data.experts.push({ ...expert, role: expert.role || 'main' })
+        }
+        n.data.onRemoveExpert = function(index) {
+          const node = nodes.value.find(nn => nn.id === cid)
+          if (node) node.data.experts.splice(index, 1)
+        }
+        n.data.onResize = function({ width, height }) { n.style = { ...n.style, width: `${width}px` } }
+        n.data.onClickBody = function() {
+          if (!selectedExpert.value) return
+          const node = nodes.value.find(nn => nn.id === cid)
+          if (node) node.data.experts.push({ ...selectedExpert.value, role: 'main' })
+          selectedExpert.value = null
+        }
+      }
+    }
   } catch (e) {
     loadStatus.value = 'error'; console.warn('Load design failed:', e)
     setTimeout(() => { loadStatus.value = '' }, 3000)
@@ -1031,7 +1103,6 @@ function onContainerChange() {
       .split(',').map(s => s.trim()).filter(Boolean)
     selectedNode.value.data.rag_bindings = containerCfg.rag_bindings
       .split(',').map(s => s.trim()).filter(Boolean)
-    updateContainerChildren()
   }
 }
 
@@ -1057,34 +1128,25 @@ function loadContainerConfig(node) {
 // ── 发言顺序计算 ──
 
 const orderedNodes = computed(() => {
-  const expertNodes = nodes.value.filter(n => n.type === 'expert')
-  if (edges.value.length === 0) return expertNodes.map(n => {
-    const container = nodes.value.find(c => c.type === 'container' && c.id === n.parentNode)
-    return { ...n, containerName: container ? container.data.name : null }
-  })
+  const allNodes = nodes.value.filter(n => n.type === 'expert' || n.type === 'container')
+  if (allNodes.length === 0) return []
+
+  if (edges.value.length === 0) return flattenNodes(allNodes)
 
   const inDegree = {}, outEdges = {}, nodeMap = {}
-  for (const n of expertNodes) { nodeMap[n.id] = n; inDegree[n.id] = 0; outEdges[n.id] = [] }
+  for (const n of allNodes) { nodeMap[n.id] = n; inDegree[n.id] = 0; outEdges[n.id] = [] }
   for (const e of edges.value) {
     if (!nodeMap[e.source] || !nodeMap[e.target]) continue
     inDegree[e.target] = (inDegree[e.target] || 0) + 1
     outEdges[e.source] = (outEdges[e.source] || []).concat(e.target)
   }
 
-  const queue = expertNodes.filter(n => (inDegree[n.id] || 0) === 0)
-  const result = []
+  const queue = allNodes.filter(n => (inDegree[n.id] || 0) === 0)
+  const sorted = []
   while (queue.length > 0) {
     const level = [...queue]
     queue.length = 0
-    for (const current of level) {
-      const container = nodes.value.find(n => n.id === current.parentNode && n.type === 'container')
-      const isMentionDriven = container && container.data.speaking_mode === 'mention_driven'
-      const repeat = isMentionDriven ? 1 : (container ? (container.data.repeat || 1) : 1)
-      const containerName = container ? container.data.name : null
-      for (let i = 0; i < repeat; i++) {
-        result.push({ ...current, containerName, loopIteration: repeat > 1 ? i + 1 : 0 })
-      }
-    }
+    for (const current of level) sorted.push(current)
     for (const current of level) {
       for (const target of (outEdges[current.id] || [])) {
         inDegree[target]--
@@ -1092,32 +1154,79 @@ const orderedNodes = computed(() => {
       }
     }
   }
-  return result.length >= expertNodes.length ? result : expertNodes.map(n => {
-    const container = nodes.value.find(c => c.type === 'container' && c.id === n.parentNode)
-    return { ...n, containerName: container ? container.data.name : null }
-  })
+  // 补充未被排序覆盖的节点
+  const sortedIds = new Set(sorted.map(n => n.id))
+  for (const n of allNodes) { if (!sortedIds.has(n.id)) sorted.push(n) }
+
+  return flattenNodes(sorted)
 })
+
+function flattenNodes(nodeList) {
+  const result = []
+  for (const n of nodeList) {
+    if (n.type === 'container') {
+      const exps = n.data.experts || []
+      const isMentionDriven = n.data.speaking_mode === 'mention_driven'
+      const repeat = isMentionDriven ? 1 : (n.data.repeat || 1)
+      for (let loop = 0; loop < repeat; loop++) {
+        for (let i = 0; i < exps.length; i++) {
+          result.push({
+            id: `${n.id}_exp_${i}`,
+            type: 'expert',
+            data: {
+              expertId: exps[i].expertId,
+              label: exps[i].label,
+              role: exps[i].role || 'main',
+              icon: exps[i].icon || '📄',
+              customPrompt: exps[i].customPrompt || null
+            },
+            parentNode: n.id,
+            containerName: n.data.name || '群聊',
+            loopIteration: repeat > 1 ? loop + 1 : 0,
+            _synthetic: true,
+            _containerId: n.id,
+            _expertIndex: i
+          })
+        }
+      }
+    } else {
+      const container = nodes.value.find(c => c.type === 'container' && c.id === n.parentNode)
+      result.push({ ...n, containerName: container ? container.data.name : null })
+    }
+  }
+  return result
+}
 
 function buildAgentConfigs() {
   const configs = {}
-  const expertNodes = nodes.value.filter(n => n.type === 'expert')
-  for (const node of expertNodes) {
-    const readCategories = []
-    if (node.data.agentReadInput !== false) readCategories.push('input')
-    if (node.data.agentReadReport !== false) readCategories.push('report')
-    if (node.data.agentReadChatLog) readCategories.push('chat_log')
-
-    configs[node.id] = {
-      stopConfig: {
-        enableTagStop: node.data.agentTagStop !== undefined ? node.data.agentTagStop : true,
-        blockEveryNRounds: node.data.agentBlockEveryNRounds || 0,
-        maxRounds: node.data.agentMaxRounds || 3,
-        onMaxRounds: node.data.agentOnMaxRounds || 'accept_last'
-      },
-      readCategories: readCategories.length > 0 ? readCategories : ['input', 'report']
+  // 独立专家节点
+  for (const node of nodes.value.filter(n => n.type === 'expert')) {
+    configs[node.id] = buildSingleAgentConfig(node.data)
+  }
+  // 容器内专家（使用合成 ID）
+  for (const container of nodes.value.filter(n => n.type === 'container')) {
+    const exps = container.data.experts || []
+    for (let i = 0; i < exps.length; i++) {
+      configs[`${container.id}_exp_${i}`] = buildSingleAgentConfig(exps[i])
     }
   }
   return configs
+}
+
+function buildSingleAgentConfig(data) {
+  const readCategories = []
+  if (data.agentReadInput !== false) readCategories.push('input')
+  if (data.agentReadReport !== false) readCategories.push('report')
+  if (data.agentReadChatLog) readCategories.push('chat_log')
+  return {
+    stopConfig: {
+      enableTagStop: data.agentTagStop !== undefined ? data.agentTagStop : true,
+      blockEveryNRounds: data.agentBlockEveryNRounds || 0,
+      maxRounds: data.agentMaxRounds || 3,
+      onMaxRounds: data.agentOnMaxRounds || 'accept_last'
+    },
+    readCategories: readCategories.length > 0 ? readCategories : ['input', 'report']
+  }
 }
 
 function runMeeting() {
@@ -1137,10 +1246,10 @@ function runMeeting() {
 
   const experts = orderedNodes.value.map(node => ({
     expert_id: node.data.expertId,
-    node_id: node.id,
+    node_id: node._synthetic ? `${node._containerId}_${node._expertIndex}` : node.id,
     role: node.data.role || 'main',
     custom_prompt: node.data.customPrompt || null,
-    container_id: node.parentNode || null,
+    container_id: node._synthetic ? node._containerId : (node.parentNode || null),
     interrupt_mode: node.data.interrupt_mode || 'every_n_msgs',
     interrupt_threshold: node.data.interrupt_threshold || 1,
     loop_iteration: node.loopIteration || 0
@@ -1165,13 +1274,9 @@ function runMeeting() {
       worldbook_bindings: n.data.worldbook_bindings || [],
       rag_bindings: n.data.rag_bindings || [],
       mention_isolation: n.data.mention_isolation !== false,
-      children: n.data.children || [],
+      children: (n.data.experts || []).map(e => e.expertId),
       edges: edges.value
-        .filter(e => {
-          const srcIn = (n.data.children || []).includes(e.source)
-          const tgtIn = (n.data.children || []).includes(e.target)
-          return srcIn || tgtIn || e.source === n.id || e.target === n.id
-        })
+        .filter(e => e.source === n.id || e.target === n.id)
         .map(e => ({ source: e.source, target: e.target }))
     }))
 
@@ -1184,9 +1289,8 @@ function runMeeting() {
     queue_files: inputSourceFiles(),
     agent_configs: buildAgentConfigs(),
     edges: edges.value.filter(e => {
-      const isInterContainer = nodes.value.some(n => 
-        (n.type === 'container' && (e.source === n.id || e.target === n.id || 
-         (n.data.children || []).includes(e.source) || (n.data.children || []).includes(e.target)))
+      const isInterContainer = nodes.value.some(n =>
+        n.type === 'container' && (e.source === n.id || e.target === n.id)
       )
       return !isInterContainer
     }).map(e => ({ source: e.source, target: e.target }))
@@ -1243,27 +1347,6 @@ async function onQueueDrop(event) {
     selectedNode.value.data.files.push({ name: data.name, content: text, uid: data.uid })
   } catch (e) { console.error('Failed to load document:', e) }
 }
-
-// ── 容器子节点同步 ──
-
-function updateContainerChildren() {
-  const map = {}
-  for (const n of nodes.value) {
-    if (n.type === 'expert' && n.parentNode) {
-      if (!map[n.parentNode]) map[n.parentNode] = []
-      map[n.parentNode].push(n.data.label)
-    }
-  }
-  for (const n of nodes.value) {
-    if (n.type === 'container') {
-      const labels = map[n.id] || []
-      n.data.children = [...new Set(labels)]
-    }
-  }
-}
-
-watch(() => nodes.value.length, () => { updateContainerChildren() })
-watch(() => nodes.value.map(n => n.parentNode).join(','), () => { updateContainerChildren() }, { immediate: true })
 
 // 监听isRunning变化，更新输出节点状态
 watch(() => props.isRunning, (running) => {
@@ -1322,17 +1405,37 @@ function addPlaceholder(type) {
 
 function addContainer() {
   const id = `container_${++nodeCounter}`
+  const nodeData = {
+    name: '群聊', label: '群聊', icon: '👥',
+    concurrency: 'serial', speaking_mode: 'ordered',
+    repeat: 1, children: [], experts: [], edges: [],
+    context_layers: null, context_tokens: null,
+    interrupt_mode: null, interrupt_threshold: 1,
+    exit_mode: 'manual', exit_ratio: 0.6, exit_gatekeeper: null, exit_max_speeches: 20,
+    worldbook_bindings: [], rag_bindings: [],
+    onAddExpert(expert) {
+      const node = nodes.value.find(n => n.id === id)
+      if (node) node.data.experts.push({ ...expert, role: expert.role || 'main' })
+    },
+    onRemoveExpert(index) {
+      const node = nodes.value.find(n => n.id === id)
+      if (node) node.data.experts.splice(index, 1)
+    },
+    onResize({ width, height }) {
+      const node = nodes.value.find(n => n.id === id)
+      if (node) node.style = { ...node.style, width: `${width}px` }
+    },
+    onClickBody() {
+      if (!selectedExpert.value) return
+      const node = nodes.value.find(n => n.id === id)
+      if (node) node.data.experts.push({ ...selectedExpert.value, role: 'main' })
+      selectedExpert.value = null
+    },
+    _pendingExpert: null
+  }
   nodes.value.push({
     id, type: 'container', position: { x: 250, y: 180 },
-    data: {
-      name: '群聊', label: '群聊', icon: '👥',
-      concurrency: 'serial', speaking_mode: 'ordered',
-      repeat: 1, children: [], edges: [],
-      context_layers: null, context_tokens: null,
-      interrupt_mode: null, interrupt_threshold: 1,
-      exit_mode: 'manual', exit_ratio: 0.6, exit_gatekeeper: null, exit_max_speeches: 20,
-      worldbook_bindings: [], rag_bindings: [],
-    },
+    data: nodeData,
     style: { width: 280, zIndex: 4 }
   })
 }
@@ -1574,6 +1677,7 @@ async function transferToLibrary() {
 .toolbox-item { display: flex; align-items: center; gap: 8px; padding: 10px; border-radius: 8px; cursor: grab; transition: background 0.2s; margin-bottom: 4px; border: 1px solid transparent; }
 .toolbox-item:hover { background: #f0f7ff; border-color: #d0e3f7; }
 .toolbox-item:active { cursor: grabbing; }
+.toolbox-item-selected { background: #e8f4fd; border-color: #3498db; box-shadow: 0 0 0 1px #3498db; }
 .custom-item { position: relative; }
 .btn-delete-expert { position: absolute; top: 4px; right: 4px; width: 18px; height: 18px; border: none; background: rgba(0,0,0,0.1); border-radius: 50%; cursor: pointer; font-size: 0.7rem; color: #999; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s; }
 .custom-item:hover .btn-delete-expert { opacity: 1; }
