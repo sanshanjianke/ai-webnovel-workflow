@@ -287,8 +287,6 @@ const getDocIcon = (layer) => {
   const icons = {
     l1: '💡',
     l2: '🏗️',
-    l3: '📝',
-    l4: '📖',
     imported: '📥'
   }
   return icons[layer] || '📄'

@@ -268,8 +268,6 @@ export interface AppConfig {
   pipeline: {
     l15: PipelineStageConfig;
     l2: PipelineStageConfig;
-    l3: { strategy: string };
-    l4: { strategy: string };
   };
 }
 
@@ -293,32 +291,6 @@ export interface VisionDocument {
   golden_finger?: string;
   hot_elements?: string;
   expected_length?: string;
-}
-
-// ============ L3 章纲 ============
-
-export interface ChapterPlan {
-  chapterName: string;
-  scenes: ScenePlan[];
-  emotionCurve?: string;
-  hooks?: string[];
-}
-
-export interface ScenePlan {
-  name: string;
-  perspective?: string;
-  pace?: string;
-  discourseMode?: string;
-  wordCount?: number;
-  contentPoints?: string[];
-}
-
-// ============ L4 正文 ============
-
-export interface GeneratedText {
-  chapterName: string;
-  content: string;
-  wordCount: number;
 }
 
 // ============ SSE 事件 ============

@@ -8,8 +8,7 @@
           <router-link to="/">仪表盘</router-link>
           <router-link :to="navLink('/l1')">L1</router-link>
           <router-link :to="navLink('/orchestrate')">编排</router-link>
-          <router-link :to="navLink('/l3')">L3</router-link>
-          <router-link :to="navLink('/l4')">L4</router-link>
+
           <router-link :to="navLink('/library')">文档库</router-link>
           <router-link :to="navLink('/output')" class="nav-output">查看输出</router-link>
           <router-link to="/settings">设置</router-link>
@@ -66,8 +65,7 @@ const pageTitle = computed(() => {
   const titles = {
     '/l1': 'L1 种子层',
     '/orchestrate': '专家编排',
-    '/l3': 'L3 叙事层',
-    '/l4': 'L4 渲染层',
+
     '/library': '文档库',
     '/settings': '系统设置'
   }

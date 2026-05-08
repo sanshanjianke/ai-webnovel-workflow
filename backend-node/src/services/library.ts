@@ -59,9 +59,7 @@ export class LibraryManager {
 
     const oldFiles: Record<string, [string, string]> = {
       'l1_vision.json': ['l1', 'L1 愿景'],
-      'l2_outline.json': ['l2', 'L2 大纲'],
-      'l3_chapter_plan.json': ['l3', 'L3 章纲'],
-      'l4_text.json': ['l4', 'L4 正文']
+      'l2_outline.json': ['l2', 'L2 大纲']
     };
 
     for (const [filename, [layer, prefix]] of Object.entries(oldFiles)) {

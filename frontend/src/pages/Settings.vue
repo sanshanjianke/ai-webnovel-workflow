@@ -102,8 +102,6 @@ const categoryLabels = {
   worldbook: '世界书模块',
   l1: 'L1种子层模块',
   l2: 'L2架构层模块',
-  l3: 'L3叙事层模块',
-  l4: 'L4渲染层模块',
   meeting_protocol: '会议协议'
 }
 

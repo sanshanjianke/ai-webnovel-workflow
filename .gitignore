@@ -71,3 +71,6 @@ papers/arxiv_papers/rename_papers.sh
 .env.local
 *.key
 *.pem
+exp.sh
+.claude/
+backend-node/user/

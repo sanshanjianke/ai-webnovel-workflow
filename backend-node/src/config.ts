@@ -39,9 +39,7 @@ const DEFAULT_CONFIG: AppConfig = {
         editor: 'web_editor_v1',
         character: 'character_designer_v1'
       }
-    },
-    l3: { strategy: 'mapping_compiler' },
-    l4: { strategy: 'constrained_renderer' }
+    }
   }
 };
 

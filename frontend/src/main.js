@@ -5,8 +5,7 @@ import App from './App.vue'
 import Dashboard from './pages/Dashboard.vue'
 import L1Seed from './pages/L1Seed.vue'
 import Orchestration from './pages/Orchestration.vue'
-import L3Narrative from './pages/L3Narrative.vue'
-import L4Render from './pages/L4Render.vue'
+
 import WorldBook from './pages/WorldBook.vue'
 import Settings from './pages/Settings.vue'
 import Library from './pages/Library.vue'
@@ -18,8 +17,7 @@ const routes = [
   { path: '/', component: Dashboard },
   { path: '/l1', component: L1Seed },
   { path: '/orchestrate', component: Orchestration },
-  { path: '/l3', component: L3Narrative },
-  { path: '/l4', component: L4Render },
+
   { path: '/worldbook', component: WorldBook },
   { path: '/library', component: Library },
   { path: '/settings', component: Settings },

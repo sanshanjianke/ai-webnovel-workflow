@@ -84,8 +84,6 @@
           <select v-model="newDoc.layer">
             <option value="l1">L1 愿景</option>
             <option value="l2">L2 大纲</option>
-            <option value="l3">L3 章纲</option>
-            <option value="l4">L4 正文</option>
           </select>
         </div>
         <div class="form-group">
@@ -190,8 +188,6 @@ const getDocIcon = (layer) => {
   const icons = {
     l1: '💡',
     l2: '🏗️',
-    l3: '📝',
-    l4: '📖',
     imported: '📥'
   }
   return icons[layer] || '📄'

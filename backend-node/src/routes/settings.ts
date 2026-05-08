@@ -11,8 +11,6 @@ export function registerSettingsRoutes(app: Express): void {
       rag: ['simple_vector'],
       worldbook: ['st_style'],
       l1: ['guided_form'],
-      l3: ['mapping_compiler'],
-      l4: ['constrained_renderer'],
       expert: listExperts(),
       meeting_protocol: ['editor_reader', 'plot_driven', 'character_driven', 'market_driven']
     });
@@ -38,17 +36,5 @@ export function registerSettingsRoutes(app: Express): void {
     const updated = { ...config, ...req.body };
     saveConfig(updated);
     res.json({ status: 'updated' });
-  });
-
-  // 获取 L3 标签
-  app.get('/api/tags/l3', (req: Request, res: Response) => {
-    // 空桩
-    res.json({});
-  });
-
-  // 获取 L4 标签
-  app.get('/api/tags/l4', (req: Request, res: Response) => {
-    // 空桩
-    res.json({});
   });
 }
