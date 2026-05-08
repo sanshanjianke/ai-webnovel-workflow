@@ -262,6 +262,7 @@ talk/
 │   │   │   ├── meeting-engine.ts       # 会议引擎
 │   │   │   ├── pipeline-engine.ts      # 流水线引擎 v1
 │   │   │   ├── object-pipeline-engine.ts  # 对象管道引擎 v2（Agent 迭代 + 群聊）
+│   │   │   ├── pipeline-workers.ts     # 四种 Worker（输入源/专家/群聊/输出）
 │   │   │   ├── recovery-manager.ts     # 断点恢复（checkpoint 保存/加载/清理）
 │   │   │   ├── zip-exporter.ts         # ZIP 打包导出/解析
 │   │   │   ├── expert-loader.ts        # 专家 JSON 定义加载器
@@ -298,7 +299,7 @@ talk/
 │       │   ├── Dashboard.vue           # 项目仪表盘
 │       │   ├── L1Seed.vue              # L1 种子（聊天+表单+预览）
 │       │   ├── Orchestration.vue       # 编排画布入口（SSE + BroadcastChannel）
-│       │   ├── ChatPopup.vue           # 三栏聊天弹窗（Agent 迭代/群聊）
+│       │   ├── ChatPopup.vue           # 单专家聊天弹窗（Agent 迭代、三栏布局）
 │       │   ├── OutputPage.vue          # 输出页面（对象列表 + ZIP）
 │       │   ├── ViewerPage.vue          # 对象查看（单对象 + ZIP 模式）
 │       │   ├── L3Narrative.vue         # L3 叙事
@@ -309,8 +310,9 @@ talk/
 │       └── components/                 # 组件
 │           ├── OrchestrationCanvas.vue  # Vue Flow 编排画布
 │           ├── ExpertNode.vue           # 专家节点
-│           ├── GroupNode.vue            # 群聊容器节点
-│           ├── RoundCard.vue            # Agent 轮次卡片
+│           ├── GroupNode.vue            # 群聊容器节点（click-to-add 专家卡片）
+│           ├── GroupChatView.vue        # 群聊聊天组件（消息流+成员+文件队列）
+│           ├── RoundCard.vue            # Agent 轮次卡片（思考+产出+自评）
 │           └── library/
 │               └── DocumentSidebar.vue  # 文档库侧边栏
 │
@@ -342,5 +344,5 @@ talk/
 
 ---
 
-版本：v5.1  
-更新：2026-05-06
+版本：v5.2  
+更新：2026-05-08
