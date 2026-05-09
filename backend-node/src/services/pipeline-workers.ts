@@ -35,7 +35,9 @@ export interface WorkerSharedState {
   globalConfig: MeetingConfig;
   feedbackMap: Map<string, string[]>;
   vision: Record<string, string>;
-  worldbook: string;
+  worldbook: string;                       // 向后兼容：所有书的合并文本
+  worldbookMap: Map<string, string>;       // bookId → 该书条目文本
+  perNodeWorldBook: Map<string, string>;   // nodeId → bookId 绑定
   rag: string;
   outputSeq: { value: number };
 }
@@ -91,6 +93,17 @@ async function dispatchToDownstream(
   }
 }
 
+/** 为指定节点解析世界书文本 */
+function resolveWorldbook(nodeId: string, state: WorkerSharedState): string {
+  // 检查该节点是否有绑定的 bookId
+  const boundBookId = state.perNodeWorldBook.get(nodeId);
+  if (boundBookId && state.worldbookMap.has(boundBookId)) {
+    return state.worldbookMap.get(boundBookId) || state.worldbook;
+  }
+  // 向后兼容：返回全部书的合并文本
+  return state.worldbook;
+}
+
 // ======================== 处理函数（产生 SSE 事件，通过 emit 回调交出） ========================
 
 async function processAgentNode(
@@ -106,7 +119,7 @@ async function processAgentNode(
 
   const context: ExpertContext = {
     vision: state.vision,
-    worldbook: state.worldbook,
+    worldbook: resolveWorldbook(nodeId, state),
     rag: state.rag,
     containerContext,
     history: []
@@ -279,7 +292,7 @@ async function processGroupChatNode(
 
       const context: ExpertContext = {
         vision: state.vision,
-        worldbook: state.worldbook,
+        worldbook: resolveWorldbook(nodeId, state),
         rag: state.rag,
         containerContext: [
           containerCtx,

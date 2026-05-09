@@ -103,6 +103,8 @@ export interface MeetingConfig {
   collaborationMode: 'semi_auto' | 'full_auto' | 'manual';
   maxRounds: number;
   maxSpeeches?: number;
+  worldbook_books?: Array<{ bookId: string; name: string }>;
+  worldbook_bindings?: Record<string, string>;  // nodeId → bookId
 }
 
 export interface ContainerConfig {
@@ -163,25 +165,82 @@ export interface Character {
 
 // ============ 世界书 ============
 
+// 选择性逻辑（参照 SillyTavern world_info_logic）
+export enum SelectiveLogic {
+  AND_ANY = 'AND_ANY',     // Primary OR secondary 任一命中
+  NOT_ALL = 'NOT_ALL',     // Primary AND NOT ALL secondary
+  NOT_ANY = 'NOT_ANY',     // Primary AND NOT ANY secondary
+  AND_ALL = 'AND_ALL'      // Primary AND ALL secondary
+}
+
+// 注入位置（参照 SillyTavern world_info_position）
+export enum WorldBookPosition {
+  BEFORE_CHAR = 'before_char',
+  AFTER_CHAR = 'after_char',
+  AN_TOP = 'an_top',
+  AN_BOTTOM = 'an_bottom',
+  AT_DEPTH = 'at_depth',
+  EM_TOP = 'em_top',
+  EM_BOTTOM = 'em_bottom',
+  OUTLET = 'outlet'
+}
+
 export interface WorldBookEntry {
   id: string;
   keys: string[];
   content: string;
   secondaryKeys?: string[];
   constant?: boolean;
-  priority?: number;
-  position?: string;
+  selective?: boolean;             // 启用选择性逻辑
+  selectiveLogic?: SelectiveLogic; // 选择逻辑模式
+  priority?: number;               // 排序权重
+  position?: string;               // 注入位置（向前兼容，也可是 WorldBookPosition 枚举值）
+  disable?: boolean;               // 禁用条目
+  comment?: string;                // 标题/备注
+  probability?: number;            // 触发概率 0-100
+  depth?: number;                  // 搜索深度
+  group?: string;                  // 同组名（互斥激活）
+  groupWeight?: number;            // 组内权重
+  sticky?: number;                 // 激活后保持 N 条消息
+  cooldown?: number;               // 停用后冷却 N 条消息
+  delay?: number;                  // 延迟 N 条消息后激活
+  role?: string;                   // 注入角色 system/user/assistant
+  scanDepth?: number;              // 逐条目搜索深度覆盖
+  caseSensitive?: boolean;         // 大小写敏感
+  matchWholeWords?: boolean;       // 全词匹配
+  excludeRecursion?: boolean;      // 不可被递归激活
+  preventRecursion?: boolean;      // 阻止递归从此条目开始
+  delayUntilRecursion?: number;    // 延迟到第 N 层递归
+  ignoreBudget?: boolean;          // 无视 token 预算
   metadata?: Record<string, unknown>;
+}
+
+export interface WorldBookInfo {
+  bookId: string;       // 唯一标识
+  name: string;         // 书名
+  entryCount: number;   // 条目数
+  createdAt: string;    // 创建时间
+  updatedAt: string;    // 最后更新时间
 }
 
 export interface WorldBook {
   getActiveEntries(contextTokens: string[]): WorldBookEntry[];
   getEntry(entryId: string): WorldBookEntry | null;
+  listAllEntries(): WorldBookEntry[];
   updateEntry(entryId: string, data: Partial<WorldBookEntry>): void;
   createEntry(entry: WorldBookEntry): void;
   deleteEntry(entryId: string): void;
   commit(message: string): string;
   listCommits(): CommitRecord[];
+  getInfo(): WorldBookInfo;
+}
+
+export interface WorldBookCollection {
+  listBooks(): WorldBookInfo[];
+  createBook(name: string): WorldBookInfo;
+  deleteBook(bookId: string): boolean;
+  getBook(bookId: string): WorldBook | null;
+  getDefaultBook(): WorldBook;
 }
 
 export interface CommitRecord {

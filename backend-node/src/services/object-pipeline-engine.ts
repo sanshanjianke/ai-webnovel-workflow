@@ -218,7 +218,9 @@ export class ObjectPipelineEngine {
     visionInput: Record<string, string>,
     worldbookText: string = '',
     ragContext: string = '',
-    resumeFrom?: CheckpointState
+    resumeFrom?: CheckpointState,
+    worldbookMap: Map<string, string> = new Map(),
+    perNodeWorldBook: Map<string, string> = new Map()
   ): AsyncGenerator<PipelineEventV2> {
     this.state = 'running';
     this.stopRequested = false;
@@ -246,6 +248,8 @@ export class ObjectPipelineEngine {
       feedbackMap: this.pendingFeedback,
       vision: visionInput,
       worldbook: worldbookText,
+      worldbookMap,
+      perNodeWorldBook,
       rag: ragContext,
       outputSeq: { value: resumeFrom?.outputSeq || 0 }
     };

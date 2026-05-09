@@ -1,4 +1,5 @@
 // 编排层路由 - 核心
+import * as fs from 'fs';
 import { Express, Request, Response } from 'express';
 import { getProjectManager } from '../services/project-manager';
 import { MeetingEngine, MeetingEvent } from '../services/meeting-engine';
@@ -222,7 +223,6 @@ export function registerMeetingRoutes(app: Express): void {
     const worldbookPath = `${project.path}/worldbook.json`;
     let worldbookText = '';
     try {
-      const fs = require('fs');
       if (fs.existsSync(worldbookPath)) {
         const wb = JSON.parse(fs.readFileSync(worldbookPath, 'utf-8'));
         const entries = wb.entries || {};
@@ -288,19 +288,49 @@ export function registerMeetingRoutes(app: Express): void {
           return createPipelineObject(fileName.replace(/\.[^.]+$/, ''), [{ path: fileName, content }])
         });
 
+        // 构建 per-book 世界书映射
+        const worldbookMap = new Map<string, string>();
+        const perNodeWorldBook = new Map<string, string>();
+
+        // 从请求中读取 worldbook_books 列表
+        if (config.worldbook_books && Array.isArray(config.worldbook_books)) {
+          for (const book of config.worldbook_books) {
+            const bookPath = `${project.path}/worldbooks/${book.bookId}.json`;
+            try {
+              if (fs.existsSync(bookPath)) {
+                const wb = JSON.parse(fs.readFileSync(bookPath, 'utf-8'));
+                const entries = wb.entries || {};
+                const text = Object.values(entries)
+                  .map((e: any) => `${e.keys?.[0] || ''}: ${e.content || ''}`)
+                  .join('\n');
+                worldbookMap.set(book.bookId, text);
+              }
+            } catch {}
+          }
+        }
+
+        // 从请求中读取 per-node worldbook bindings
+        if (config.worldbook_bindings && typeof config.worldbook_bindings === 'object') {
+          for (const [nodeId, bookId] of Object.entries(config.worldbook_bindings)) {
+            perNodeWorldBook.set(nodeId, bookId as string);
+          }
+        }
+
         for await (const event of engine.processQueue(
           objects,
           {},
           worldbookText,
-          ''
+          '',
+          undefined,
+          worldbookMap,
+          perNodeWorldBook
         )) {
           writer.write(event.type, event.data);
         }
 
         // 持久化管道产出供后续导出
         try {
-          const fs = require('fs');
-          const outputDir = `${project.path}/outputs`;
+              const outputDir = `${project.path}/outputs`;
           if (!fs.existsSync(outputDir)) {
             fs.mkdirSync(outputDir, { recursive: true });
           }
@@ -418,7 +448,6 @@ export function registerMeetingRoutes(app: Express): void {
     }
 
     const outputPath = `${project.path}/outputs/meeting_output.json`;
-    const fs = require('fs');
     
     if (fs.existsSync(outputPath)) {
       const output = JSON.parse(fs.readFileSync(outputPath, 'utf-8'));
@@ -436,7 +465,6 @@ export function registerMeetingRoutes(app: Express): void {
     }
 
     try {
-      const fs = require('fs');
       const outputPath = `${project.path}/outputs/pipeline_${req.params.sessionId}.json`;
 
       if (!fs.existsSync(outputPath)) {
@@ -532,7 +560,6 @@ export function registerMeetingRoutes(app: Express): void {
     const worldbookPath = `${project.path}/worldbook.json`;
     let worldbookText = '';
     try {
-      const fs = require('fs');
       if (fs.existsSync(worldbookPath)) {
         const wb = JSON.parse(fs.readFileSync(worldbookPath, 'utf-8'));
         const entries = wb.entries || {};
@@ -571,7 +598,6 @@ export function registerMeetingRoutes(app: Express): void {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    const fs = require('fs');
     const outputPath = `${project.path}/outputs/meeting_output.json`;
     fs.writeFileSync(outputPath, JSON.stringify(req.body, null, 2), 'utf-8');
 
@@ -586,7 +612,6 @@ export function registerMeetingRoutes(app: Express): void {
     }
 
     const designPath = `${project.path}/outputs/canvas_design.json`;
-    const fs = require('fs');
     
     if (fs.existsSync(designPath)) {
       const design = JSON.parse(fs.readFileSync(designPath, 'utf-8'));
@@ -602,7 +627,6 @@ export function registerMeetingRoutes(app: Express): void {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    const fs = require('fs');
     const designPath = `${project.path}/outputs/canvas_design.json`;
     fs.writeFileSync(designPath, JSON.stringify(req.body, null, 2), 'utf-8');
 

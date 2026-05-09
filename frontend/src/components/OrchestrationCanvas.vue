@@ -94,7 +94,7 @@
           <span class="toolbar-label">工具</span>
           <span class="toolbar-sep"></span>
           <button class="toolbar-btn" @click="addContainer" title="群聊（多专家同时讨论）">📦</button>
-          <button class="toolbar-btn" @click="addPlaceholder('worldbook')" title="世界书节点">📖</button>
+          <button class="toolbar-btn" @click="addWorldBookNode" title="世界书节点">📖</button>
           <button class="toolbar-btn" @click="addPlaceholder('rag')" title="RAG节点">🔍</button>
           <button class="toolbar-btn" @click="addPlaceholder('splitter')" title="章节拆分师">✂️</button>
           <span class="toolbar-sep"></span>
@@ -239,12 +239,17 @@
           </select>
         </div>
         <div class="config-field">
-          <label>世界书查询</label>
-          <select :value="nodeTriggers.worldbook" @change="setTrigger('worldbook', $event.target.value)" class="trigger-select-wb">
-            <option value="off">关闭</option>
-            <option value="manual">手动</option>
-            <option value="auto">自动（发言前注入）</option>
+          <label>绑定世界书</label>
+          <select
+            :value="expertWorldBookBinding"
+            @change="setWorldBookBinding($event.target.value)"
+            class="trigger-select-wb">
+            <option value="">不绑定（使用所有书）</option>
+            <option v-for="wb in worldBookNodes" :key="wb.id" :value="wb.data.bookId">
+              {{ wb.data.bookName || wb.data.label }}
+            </option>
           </select>
+          <small v-if="worldBookNodes.length === 0" style="color:#999;">画布上无世界书节点，请先在工具栏点击 📖 添加</small>
         </div>
         <div class="config-field">
           <label>RAG 检索</label>
@@ -371,6 +376,29 @@
           </div>
         </div>
         <div class="config-actions">
+          <button class="btn btn-danger btn-sm" @click="removeNode">删除节点</button>
+        </div>
+      </div>
+
+      <!-- ── 右侧面板：世界书节点 ── -->
+      <div class="config-panel" v-else-if="selectedNode && selectedNode.type === 'worldbook'">
+        <div class="panel-header-row">
+          <h4>📖 世界书节点</h4>
+          <button class="btn-back" @click="selectedNode = null">← 返回</button>
+        </div>
+        <div class="config-field">
+          <label>书名</label>
+          <input :value="selectedNode.data.bookName" @change="e => { selectedNode.data.bookName = e.target.value; selectedNode.data.label = e.target.value }" />
+        </div>
+        <div class="config-field">
+          <label>Book ID</label>
+          <input :value="selectedNode.data.bookId" disabled />
+        </div>
+        <div class="config-field">
+          <label>条目数：{{ selectedNode.data.entryCount || 0 }}</label>
+        </div>
+        <div class="config-actions" style="display:flex;flex-direction:column;gap:6px;">
+          <button class="btn btn-primary btn-sm" @click="openWorldBookPage(selectedNode)">📖 管理世界书条目</button>
           <button class="btn btn-danger btn-sm" @click="removeNode">删除节点</button>
         </div>
       </div>
@@ -520,6 +548,7 @@ import GroupNode from './GroupNode.vue'
 import InputSourceNode from './InputSourceNode.vue'
 import OutputNode from './OutputNode.vue'
 import JudgmentNode from './JudgmentNode.vue'
+import WorldBookNode from './WorldBookNode.vue'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 
@@ -532,7 +561,7 @@ const props = defineProps({
   layer: { type: String, default: 'l2' }
 })
 
-const nodeTypes = { expert: markRaw(ExpertNode), container: markRaw(GroupNode), inputSource: markRaw(InputSourceNode), output: markRaw(OutputNode), judgment: markRaw(JudgmentNode) }
+const nodeTypes = { expert: markRaw(ExpertNode), container: markRaw(GroupNode), inputSource: markRaw(InputSourceNode), output: markRaw(OutputNode), judgment: markRaw(JudgmentNode), worldbook: markRaw(WorldBookNode) }
 
 const nodes = ref([])
 const edges = ref([])
@@ -1154,6 +1183,25 @@ const nodeTriggers = computed(() => {
   return { worldbook: t.worldbook || 'off', rag: t.rag || 'off' }
 })
 
+const worldBookNodes = computed(() => nodes.value.filter(n => n.type === 'worldbook'))
+
+const expertWorldBookBinding = computed(() => {
+  if (!selectedNode.value || !selectedNode.value.data) return ''
+  return selectedNode.value.data.worldbookBinding || ''
+})
+
+function setWorldBookBinding(bookId) {
+  if (selectedNode.value && selectedNode.value.type === 'expert') {
+    selectedNode.value.data.worldbookBinding = bookId || ''
+  }
+}
+
+function openWorldBookPage(node) {
+  if (!node || node.type !== 'worldbook') return
+  const url = `/worldbook?projectId=${encodeURIComponent(props.projectId || '')}&bookId=${encodeURIComponent(node.data.bookId || '')}`
+  window.open(url, '_blank')
+}
+
 function setTrigger(field, value) {
   if (selectedNode.value && selectedNode.value.type === 'expert') {
     if (!selectedNode.value.data.triggers) selectedNode.value.data.triggers = {}
@@ -1225,7 +1273,7 @@ function loadContainerConfig(node) {
 // ── 发言顺序计算 ──
 
 const orderedNodes = computed(() => {
-  const allNodes = nodes.value.filter(n => n.type === 'expert' || n.type === 'container' || n.type === 'judgment')
+  const allNodes = nodes.value.filter(n => n.type === 'expert' || n.type === 'container' || n.type === 'judgment' || n.type === 'worldbook')
   if (allNodes.length === 0) return []
 
   if (edges.value.length === 0) return flattenNodes(allNodes)
@@ -1378,12 +1426,27 @@ function runMeeting() {
         .map(e => ({ source: e.source, target: e.target }))
     }))
 
+  // 收集世界书节点信息
+  const worldbookBooks = nodes.value
+    .filter(n => n.type === 'worldbook')
+    .map(n => ({ bookId: n.data.bookId, name: n.data.bookName || n.data.label }))
+
+  // 收集每个专家的世界书绑定
+  const expertWorldBookBindings = {}
+  for (const node of nodes.value.filter(n => n.type === 'expert')) {
+    if (node.data.worldbookBinding) {
+      expertWorldBookBindings[node.id] = node.data.worldbookBinding
+    }
+  }
+
   emit('run', {
     meeting_name: meetingName.value,
     pipeline: true,
     pipeline_version: 2,
     experts,
     containers,
+    worldbook_books: worldbookBooks,
+    worldbook_bindings: expertWorldBookBindings,
     queue_files: inputSourceFiles(),
     agent_configs: buildAgentConfigs(),
     edges: edges.value.filter(e => {
@@ -1484,11 +1547,32 @@ watch(() => props.pipelineOutput, (output) => {
   console.log('[OrchestrationCanvas] Files set to output nodes:', files)
 }, { immediate: true, deep: true })
 
+// ── 世界书节点 ──
+
+function addWorldBookNode() {
+  const id = `worldbook_${++nodeCounter}`
+  const bookName = `世界书 ${nodeCounter}`
+  const bookId = `wb_${Date.now()}_${nodeCounter}`
+  nodes.value.push({
+    id, type: 'worldbook', position: { x: 100 + nodeCounter * 80, y: 300 + nodeCounter * 30 },
+    data: { label: bookName, bookId, bookName, entryCount: 0, selected: false },
+    style: { zIndex: 5 }
+  })
+  if (props.projectId) {
+    axios.post(`/api/projects/${props.projectId}/worldbooks`, { name: bookName }).then(res => {
+      const node = nodes.value.find(n => n.id === id)
+      if (node) {
+        node.data.bookId = res.data.book.bookId
+        node.data.bookName = res.data.book.name
+      }
+    }).catch(() => {})
+  }
+}
+
 // ── 占位节点 ──
 
 function addPlaceholder(type) {
   const configs = {
-    worldbook: { label: '世界书', icon: '📖', expertId: '__worldbook__', desc: '设定查询/更新' },
     rag: { label: 'RAG检索', icon: '🔍', expertId: '__rag__', desc: '历史/技法检索' },
     splitter: { label: '章节拆分师', icon: '✂️', expertId: 'chapter_splitter_v1', desc: '卷纲→章节' }
   }
@@ -1583,6 +1667,8 @@ function onNodeClick({ node }) {
     showQueuePanel.value = true
   } else if (node.type === 'output') {
     // 输出节点单击时只选中，显示属性面板
+  } else if (node.type === 'worldbook') {
+    // 世界书节点单击时选中，显示配置
   } else if (node.type === 'judgment') {
     // 判断节点单击时选中，显示配置
   }
@@ -1598,6 +1684,11 @@ function onNodeDoubleClick({ node }) {
 }
 
 function openNodeChatTab(node) {
+  // 世界书节点 → 打开管理页面
+  if (node.type === 'worldbook') {
+    openWorldBookPage(node)
+    return
+  }
   // 判断节点无聊天，双击不做任何事
   if (node.type === 'judgment') return
   // 输出节点打开输出页面
