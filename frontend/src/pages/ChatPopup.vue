@@ -90,8 +90,8 @@
           <!-- 拖拽手柄：聊天区 ↔ 右侧栏 -->
           <div class="resize-handle" @mousedown="startResize('right')"></div>
 
-          <!-- 标签库容器（独立） -->
-          <div class="l3l4-taglib-container" :style="{ width: rightPanelWidth + 'px' }">
+          <!-- 标签库容器（独立，宽度跟随内容） -->
+          <div class="l3l4-taglib-container">
             <TagLibrary ref="taglibRef" />
           </div>
 
@@ -1257,11 +1257,10 @@ onUnmounted(() => {
   border-radius: 8px;
 }
 
-/* L3/L4 标签库独立容器 */
+/* L3/L4 标签库独立容器（宽度跟随 TagLibrary 自身） */
 .l3l4-taglib-container {
   flex-shrink: 0;
   min-height: 0;
-  overflow: hidden;
 }
 
 /* L3/L4 对象文件独立容器 */

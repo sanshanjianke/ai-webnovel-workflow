@@ -2,7 +2,7 @@
   <div
     class="tag-library"
     :class="{ collapsed: isCollapsed }"
-    :style="{ width: isCollapsed ? '40px' : '220px' }"
+    :style="{ width: isCollapsed ? '26px' : '220px' }"
   >
     <div class="taglib-header">
       <span v-if="!isCollapsed" class="taglib-title">标签库</span>
@@ -220,6 +220,17 @@ onMounted(() => {
 }
 .tag-library.collapsed {
   height: auto;
+  border-left: none;
+}
+.tag-library.collapsed .taglib-header {
+  padding: 2px;
+  border-bottom: none;
+  justify-content: center;
+}
+.tag-library.collapsed .btn-toggle {
+  width: 22px;
+  height: 22px;
+  margin: 0;
 }
 
 .taglib-header {
