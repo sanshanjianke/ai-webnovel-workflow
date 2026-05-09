@@ -530,6 +530,44 @@
         </div>
       </div>
     </div>
+
+    <!-- ── 世界书选择弹窗 ── -->
+    <div v-if="showWorldBookPicker" class="modal-overlay" @click.self="showWorldBookPicker = false">
+      <div class="modal-content card" style="width:400px;">
+        <h2 style="margin-bottom:1rem;">📖 添加世界书节点</h2>
+
+        <div style="display:flex; gap:8px; margin-bottom:1rem;">
+          <label class="picker-tab" :class="{ active: worldBookPickerMode === 'existing' }">
+            <input type="radio" v-model="worldBookPickerMode" value="existing" /> 绑定已有书
+          </label>
+          <label class="picker-tab" :class="{ active: worldBookPickerMode === 'new' }">
+            <input type="radio" v-model="worldBookPickerMode" value="new" /> 创建新书
+          </label>
+        </div>
+
+        <div v-if="worldBookPickerMode === 'existing'" class="form-group">
+          <label>选择世界书</label>
+          <select v-model="worldBookPickerSelected" class="full-width">
+            <option v-for="b in worldBookPickerList" :key="b.bookId" :value="b.bookId">
+              {{ b.name }} ({{ b.entryCount }} 条)
+            </option>
+          </select>
+          <small v-if="worldBookPickerList.length === 0" style="color:#999;">暂无已有世界书，请先创建</small>
+        </div>
+
+        <div v-else class="form-group">
+          <label>书名</label>
+          <input v-model="worldBookPickerNewName" placeholder="输入新世界书名称" @keyup.enter="confirmAddWorldBookNode" />
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn btn-primary" @click="confirmAddWorldBookNode" :disabled="worldBookPickerMode === 'existing' && (!worldBookPickerSelected || worldBookPickerList.length === 0) || (worldBookPickerMode === 'new' && !worldBookPickerNewName.trim())">
+            确认添加
+          </button>
+          <button class="btn" @click="showWorldBookPicker = false">取消</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1568,16 +1606,41 @@ watch(() => props.pipelineOutput, (output) => {
 
 // ── 世界书节点 ──
 
-function addWorldBookNode() {
-  const id = `worldbook_${++nodeCounter}`
-  const bookName = `世界书 ${nodeCounter}`
-  const bookId = `wb_${Date.now()}_${nodeCounter}`
-  nodes.value.push({
-    id, type: 'worldbook', position: { x: 100 + nodeCounter * 80, y: 300 + nodeCounter * 30 },
-    data: { label: bookName, bookId, bookName, entryCount: 0, selected: false },
-    style: { zIndex: 5 }
-  })
+const showWorldBookPicker = ref(false)
+const worldBookPickerList = ref([])
+const worldBookPickerMode = ref('existing')  // 'existing' | 'new'
+const worldBookPickerSelected = ref('')
+const worldBookPickerNewName = ref('')
+
+async function addWorldBookNode() {
+  // 拉取已有世界书列表
   if (props.projectId) {
+    try {
+      const res = await axios.get(`/api/projects/${props.projectId}/worldbooks`)
+      worldBookPickerList.value = res.data.books || []
+    } catch { worldBookPickerList.value = [] }
+  }
+  worldBookPickerSelected.value = worldBookPickerList.value[0]?.bookId || ''
+  worldBookPickerNewName.value = ''
+  worldBookPickerMode.value = 'existing'
+  showWorldBookPicker.value = true
+}
+
+function confirmAddWorldBookNode() {
+  showWorldBookPicker.value = false
+
+  let bookId, bookName
+
+  if (worldBookPickerMode.value === 'existing' && worldBookPickerSelected.value) {
+    // 绑定已有书
+    const book = worldBookPickerList.value.find(b => b.bookId === worldBookPickerSelected.value)
+    bookId = book.bookId
+    bookName = book.name
+  } else if (worldBookPickerMode.value === 'new' && worldBookPickerNewName.value.trim()) {
+    // 创建新书
+    bookId = `wb_${Date.now()}_${++nodeCounter}`
+    bookName = worldBookPickerNewName.value.trim()
+    // 异步创建，节点先用临时 bookId
     axios.post(`/api/projects/${props.projectId}/worldbooks`, { name: bookName }).then(res => {
       const node = nodes.value.find(n => n.id === id)
       if (node) {
@@ -1585,6 +1648,19 @@ function addWorldBookNode() {
         node.data.bookName = res.data.book.name
       }
     }).catch(() => {})
+  } else {
+    return  // 未选择
+  }
+
+  const id = `worldbook_${++nodeCounter}`
+  nodes.value.push({
+    id, type: 'worldbook', position: { x: 100 + nodeCounter * 80, y: 300 + nodeCounter * 30 },
+    data: { label: bookName, bookId, bookName, entryCount: 0, selected: false },
+    style: { zIndex: 5 }
+  })
+  // 已有书：立即拉取条目数
+  if (worldBookPickerMode.value === 'existing') {
+    refreshWorldBookNode(nodes.value.find(n => n.id === id))
   }
 }
 
@@ -1993,6 +2069,14 @@ async function transferToLibrary() {
   font-family: monospace; font-size: 0.8rem; white-space: pre-wrap;
   max-height: 200px; overflow-y: auto; margin: 0;
 }
+
+.picker-tab {
+  flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px;
+  cursor: pointer; font-size: 0.85rem; text-align: center; transition: all 0.15s;
+}
+.picker-tab.active { background: #f0f7ff; border-color: #3498db; color: #3498db; font-weight: 600; }
+.picker-tab input { display: none; }
+.full-width { width: 100%; }
 
 /* ── 输入源队列（在右侧配置面板内）─── */
 .queue-actions { display: flex; gap: 8px; margin: 8px 0; }
