@@ -62,6 +62,7 @@ export interface ExpertConfig {
   customPrompt?: string;
   containerId?: string;
   nodeId?: string;
+  nodeType?: string;
   interruptMode?: 'auto' | 'every_n_msgs' | 'every_n_tokens' | 'on_mention';
   interruptThreshold?: number;
 }
@@ -126,6 +127,14 @@ export interface EdgeConfig {
   source: string;
   target: string;
   type?: string;
+  sourcePort?: string;
+  targetPort?: string;
+}
+
+export interface OutputPort {
+  name: string;
+  label: string;
+  color?: string;
 }
 
 export interface MeetingOutput {
@@ -442,6 +451,13 @@ export interface PipelineObject {
   currentNodeId?: string;
   startedAt?: string;
   completedAt?: string;
+  meta?: PipelineObjectMeta;
+}
+
+export interface PipelineObjectMeta {
+  rejectCount: number;
+  maxRejects: number;
+  routePort?: string;
 }
 
 export interface PipelineObjectFile {

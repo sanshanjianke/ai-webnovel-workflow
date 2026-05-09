@@ -1,8 +1,8 @@
 <template>
   <div class="orchestration-page">
     <div class="preset-bar">
-      <button 
-        v-for="p in presets" :key="p.key"
+      <button
+        v-for="p in layerPresets" :key="p.key"
         :class="['preset-btn', { active: activePreset === p.key }]"
         @click="loadPreset(p.key)"
       >
@@ -15,10 +15,10 @@
       <div class="toolbox">
         <div class="toolbox-section" :class="{ collapsed: !builtinOpen }" @click="builtinOpen = !builtinOpen">
           <span class="section-arrow">{{ builtinOpen ? '▾' : '▸' }}</span>
-          <h4>默认专家</h4>
+          <h4>{{ currentLayer === 'l3l4' ? 'L3/L4 专家' : '默认专家' }}</h4>
         </div>
         <div v-show="builtinOpen">
-          <div v-for="(expert, id) in availableExperts" :key="id"
+          <div v-for="(expert, id) in layerExperts" :key="id"
             class="toolbox-item"
             :class="{ 'toolbox-item-selected': selectedExpert && selectedExpert.expertId === id }"
             draggable="true"
@@ -99,6 +99,7 @@
           <button class="toolbar-btn" @click="addPlaceholder('splitter')" title="章节拆分师">✂️</button>
           <span class="toolbar-sep"></span>
           <button class="toolbar-btn" @click="addInputSource" title="输入源节点（队列.md文件）">📥</button>
+          <button class="toolbar-btn" @click="addJudgment" title="判断节点（审核通过/打回）">⚖️</button>
           <button class="toolbar-btn" @click="addOutput" title="输出节点（收集结果）">📤</button>
           <button class="toolbar-btn" @click="saveDesign" :disabled="!projectId || saveStatus === 'saving'" :title="saveStatus === 'saved' ? '已保存' : saveStatus === 'error' ? '保存失败' : '保存到文档库'">
             {{ saveStatus === 'saving' ? '⏳' : saveStatus === 'saved' ? '✅' : saveStatus === 'error' ? '❌' : '💾' }}
@@ -518,6 +519,7 @@ import ExpertNode from './ExpertNode.vue'
 import GroupNode from './GroupNode.vue'
 import InputSourceNode from './InputSourceNode.vue'
 import OutputNode from './OutputNode.vue'
+import JudgmentNode from './JudgmentNode.vue'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 
@@ -526,10 +528,11 @@ const props = defineProps({
   projectId: { type: String, default: '' },
   isRunning: { type: Boolean, default: false },
   isPaused: { type: Boolean, default: false },
-  pipelineOutput: { type: Object, default: null }
+  pipelineOutput: { type: Object, default: null },
+  layer: { type: String, default: 'l2' }
 })
 
-const nodeTypes = { expert: markRaw(ExpertNode), container: markRaw(GroupNode), inputSource: markRaw(InputSourceNode), output: markRaw(OutputNode) }
+const nodeTypes = { expert: markRaw(ExpertNode), container: markRaw(GroupNode), inputSource: markRaw(InputSourceNode), output: markRaw(OutputNode), judgment: markRaw(JudgmentNode) }
 
 const nodes = ref([])
 const edges = ref([])
@@ -656,12 +659,38 @@ const availableExperts = {
   discussion_summarizer_v1: { label: '讨论总结师', icon: '📋', desc: '提炼共识/标注分歧' }
 }
 
-const presets = [
+// L3/L4 标签层专家（复用同一批 expertId，改标签）
+const l3l4Experts = {
+  plot_architect_v1: { label: '情节解析师', icon: '🏗', desc: '功能序列/情节结构标注' },
+  character_designer_v1: { label: '人物解析师', icon: '🎭', desc: '行动元/人设一致标注' },
+  senior_author_v1: { label: '爽点解析师', icon: '⚡', desc: '读者情绪曲线标注' },
+  web_editor_v1: { label: '叙事解析师', icon: '👁', desc: '视角/节奏/话语模式标注' },
+  reader_representative_v1: { label: '编剧总结师', icon: '📋', desc: '全局审核/增删改标签' },
+  discussion_summarizer_v1: { label: '文本渲染师', icon: '📝', desc: '标签→段落渲染' }
+}
+
+// 当前层：由父页面通过 props.layer 决定
+const currentLayer = computed(() => props.layer)
+
+const layerExperts = computed(() => {
+  return currentLayer.value === 'l3l4' ? l3l4Experts : availableExperts
+})
+
+const l2Presets = [
   { key: 'quick_review', label: '快速审核' },
   { key: 'volume_planning', label: '卷纲规划' },
   { key: 'chapter_design', label: '章纲设计' },
   { key: 'custom', label: '自定义' }
 ]
+
+const l3l4Presets = [
+  { key: 'l3_l4', label: 'L3/L4 标签+渲染' },
+  { key: 'custom', label: '自定义' }
+]
+
+const layerPresets = computed(() => {
+  return currentLayer.value === 'l3l4' ? l3l4Presets : l2Presets
+})
 
 const presetConfigs = {
   quick_review: {
@@ -683,11 +712,51 @@ const presetConfigs = {
       { expert_id: 'web_editor_v1', role: 'review' },
       { expert_id: 'character_designer_v1', role: 'supplement' }
     ]
+  },
+  l3_l4: {
+    meeting_name: 'L3/L4 标签映射+渲染',
+    nodes: [
+      { type: 'inputSource', id: 'input_1', position: { x: 80, y: 250 }, data: { label: '输入源（章节草稿）', files: [] } },
+      // L3 标签专家
+      { type: 'expert', id: 'node_1', position: { x: 280, y: 100 }, data: { label: '情节解析师', expertId: 'plot_architect_v1', role: 'main' } },
+      { type: 'expert', id: 'node_2', position: { x: 280, y: 240 }, data: { label: '人物解析师', expertId: 'character_designer_v1', role: 'main' } },
+      { type: 'expert', id: 'node_3', position: { x: 280, y: 380 }, data: { label: '爽点解析师', expertId: 'senior_author_v1', role: 'main' } },
+      // L3 审核
+      { type: 'judgment', id: 'judgment_1', position: { x: 500, y: 240 }, data: { label: '标签审核', expertId: '__judgment__', role: 'main', maxRejects: 3 } },
+      // L4 渲染
+      { type: 'expert', id: 'node_4', position: { x: 700, y: 140 }, data: { label: '文本渲染师', expertId: 'senior_author_v1', role: 'main' } },
+      { type: 'expert', id: 'node_5', position: { x: 700, y: 340 }, data: { label: '润色编辑', expertId: 'web_editor_v1', role: 'review' } },
+      // L4 审核
+      { type: 'judgment', id: 'judgment_2', position: { x: 920, y: 240 }, data: { label: '质量审核', expertId: '__judgment__', role: 'main', maxRejects: 2 } },
+      { type: 'output', id: 'output_1', position: { x: 1120, y: 240 }, data: { label: '输出', running: false, done: false, selected: false } }
+    ],
+    edges: [
+      // 输入 → L3 专家
+      { source: 'input_1', target: 'node_1' },
+      { source: 'input_1', target: 'node_2' },
+      { source: 'input_1', target: 'node_3' },
+      // L3 专家 → 标签审核
+      { source: 'node_1', target: 'judgment_1' },
+      { source: 'node_2', target: 'judgment_1' },
+      { source: 'node_3', target: 'judgment_1' },
+      // 标签审核 pass → L4 渲染
+      { source: 'judgment_1', target: 'node_4', sourcePort: 'pass' },
+      { source: 'judgment_1', target: 'node_5', sourcePort: 'pass' },
+      // 标签审核 reject → 打回 L3
+      { source: 'judgment_1', target: 'node_1', sourcePort: 'reject' },
+      // L4 渲染 → 质量审核
+      { source: 'node_4', target: 'judgment_2' },
+      { source: 'node_5', target: 'judgment_2' },
+      // 质量审核 pass → 输出
+      { source: 'judgment_2', target: 'output_1', sourcePort: 'pass' },
+      // 质量审核 reject → 打回 L4
+      { source: 'judgment_2', target: 'node_4', sourcePort: 'reject' }
+    ]
   }
 }
 
 function getAllExperts() {
-  return { ...availableExperts, ...customExperts.value }
+  return { ...layerExperts.value, ...customExperts.value }
 }
 
 onMounted(() => {
@@ -721,7 +790,8 @@ async function saveDesign() {
         data: { ...n.data }
       })),
       edges: edges.value.map(e => ({
-        id: e.id, source: e.source, target: e.target, animated: true
+        id: e.id, source: e.source, target: e.target, animated: true,
+        sourcePort: e.sourcePort || undefined, targetPort: e.targetPort || undefined
       }))
     }
     const now = new Date()
@@ -893,6 +963,27 @@ function loadPreset(key) {
   if (!preset) return
   meetingName.value = preset.meeting_name
   nodes.value = []; edges.value = []; nodeCounter = 0
+
+  // 新格式：直接指定 nodes + edges（如 L3/L4）
+  if (preset.nodes) {
+    nodes.value = preset.nodes.map(n => {
+      nodeCounter = Math.max(nodeCounter, parseInt(n.id.replace(/\D/g, '')) || 0)
+      return {
+        ...n,
+        style: n.style || ((n.type === 'expert' || n.type === 'judgment') ? { zIndex: 5 } : { zIndex: 0 })
+      }
+    })
+    edges.value = preset.edges.map((e, i) => ({
+      id: e.id || `edge_${e.source}_${e.target}_${i}`,
+      source: e.source, target: e.target,
+      animated: true,
+      sourcePort: e.sourcePort || undefined,
+      targetPort: e.targetPort || undefined
+    }))
+    return
+  }
+
+  // 旧格式：experts 列表自动排成链
   const allExperts = getAllExperts()
   let prevId = null
   for (const exp of preset.experts) {
@@ -984,10 +1075,10 @@ async function loadDesignByUid(uid) {
     nodes.value = content.nodes.map(n => ({
       id: n.id, type: n.type || 'expert', position: n.position,
       parentNode: n.parentNode || null,
-      style: n.style || (n.type === 'expert' ? { zIndex: 5 } : { zIndex: 0 }),
+      style: n.style || ((n.type === 'expert' || n.type === 'judgment') ? { zIndex: 5 } : { zIndex: 0 }),
       data: { ...n.data }
     }))
-    edges.value = content.edges.map(e => ({ id: e.id, source: e.source, target: e.target, animated: true }))
+    edges.value = content.edges.map(e => ({ id: e.id, source: e.source, target: e.target, animated: true, sourcePort: e.sourcePort, targetPort: e.targetPort }))
     nodeCounter = nodes.value.length
     activePreset.value = 'custom'
     selectedNode.value = null
@@ -1021,7 +1112,13 @@ async function loadDesignByUid(uid) {
 }
 
 function onConnect(connection) {
-  edges.value.push({ id: `edge_${connection.source}_${connection.target}`, source: connection.source, target: connection.target, animated: true })
+  edges.value.push({
+    id: `edge_${connection.source}_${connection.target}`,
+    source: connection.source, target: connection.target,
+    animated: true,
+    sourcePort: connection.sourceHandle || undefined,
+    targetPort: connection.targetHandle || undefined
+  })
 }
 
 function onEdgeClick({ edge }) { edges.value = edges.value.filter(e => e.id !== edge.id) }
@@ -1128,7 +1225,7 @@ function loadContainerConfig(node) {
 // ── 发言顺序计算 ──
 
 const orderedNodes = computed(() => {
-  const allNodes = nodes.value.filter(n => n.type === 'expert' || n.type === 'container')
+  const allNodes = nodes.value.filter(n => n.type === 'expert' || n.type === 'container' || n.type === 'judgment')
   if (allNodes.length === 0) return []
 
   if (edges.value.length === 0) return flattenNodes(allNodes)
@@ -1245,11 +1342,12 @@ function runMeeting() {
   })
 
   const experts = orderedNodes.value.map(node => ({
-    expert_id: node.data.expertId,
+    expert_id: node.type === 'judgment' ? '__judgment__' : node.data.expertId,
     node_id: node._synthetic ? `${node._containerId}_${node._expertIndex}` : node.id,
     role: node.data.role || 'main',
     custom_prompt: node.data.customPrompt || null,
     container_id: node._synthetic ? node._containerId : (node.parentNode || null),
+    node_type: node.type === 'judgment' ? 'judgment' : undefined,
     interrupt_mode: node.data.interrupt_mode || 'every_n_msgs',
     interrupt_threshold: node.data.interrupt_threshold || 1,
     loop_iteration: node.loopIteration || 0
@@ -1293,7 +1391,7 @@ function runMeeting() {
         n.type === 'container' && (e.source === n.id || e.target === n.id)
       )
       return !isInterContainer
-    }).map(e => ({ source: e.source, target: e.target }))
+    }).map(e => ({ source: e.source, target: e.target, sourcePort: e.sourcePort }))
   })
 }
 
@@ -1459,6 +1557,15 @@ function addOutput() {
   })
 }
 
+function addJudgment() {
+  const id = `judgment_${++nodeCounter}`
+  nodes.value.push({
+    id, type: 'judgment', position: { x: 500, y: 300 },
+    data: { label: '判断', expertId: '__judgment__', role: 'main', maxRejects: 3, selected: false },
+    style: { zIndex: 5 }
+  })
+}
+
 function onNodeClick({ node }) {
   selectedNode.value = node
   if (node.type === 'expert') {
@@ -1476,6 +1583,8 @@ function onNodeClick({ node }) {
     showQueuePanel.value = true
   } else if (node.type === 'output') {
     // 输出节点单击时只选中，显示属性面板
+  } else if (node.type === 'judgment') {
+    // 判断节点单击时选中，显示配置
   }
 }
 
@@ -1489,13 +1598,17 @@ function onNodeDoubleClick({ node }) {
 }
 
 function openNodeChatTab(node) {
+  // 判断节点无聊天，双击不做任何事
+  if (node.type === 'judgment') return
   // 输出节点打开输出页面
   if (node.type === 'output') {
     window.open(`/output?projectId=${encodeURIComponent(props.projectId || '')}`, '_blank')
     return
   }
 
-  let params = `projectId=${encodeURIComponent(props.projectId || '')}&nodeType=${encodeURIComponent(node.type)}`
+  const layer = props.layer || 'l2'
+  const chatRoute = layer === 'l3l4' ? '/l3l4-chat' : '/chat-popup'
+  let params = `projectId=${encodeURIComponent(props.projectId || '')}&nodeType=${encodeURIComponent(node.type)}&layer=${encodeURIComponent(layer)}`
   if (node.type === 'container') {
     params += `&containerId=${encodeURIComponent(node.id)}&name=${encodeURIComponent(node.data.name || '容器')}`
   } else if (node.type === 'expert') {
@@ -1506,7 +1619,7 @@ function openNodeChatTab(node) {
   } else if (node.type === 'inputSource') {
     params += `&name=${encodeURIComponent(node.data.label || '输入源')}`
   }
-  window.open(`/chat-popup?${params}`, '_blank')
+  window.open(`${chatRoute}?${params}`, '_blank')
 }
 
 function onNodeContextMenu({ event, node }) {

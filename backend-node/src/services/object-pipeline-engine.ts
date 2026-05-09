@@ -3,14 +3,14 @@
 // 引擎只管：建 Worker、收集事件、yield 给 SSE、stop/pause/checkpoint。
 import {
   MeetingConfig, ExpertRole, Granularity, ContainerConfig,
-  AgentStopConfig, PipelineObject
+  AgentStopConfig, PipelineObject, OutputPort
 } from '../protocols';
 import { AsyncQueue } from '../utils/queue';
 import { CheckpointState, saveCheckpoint, deleteCheckpoint } from './recovery-manager';
 import {
   WorkerSharedState, NodeWorkerConfig,
   DEFAULT_STOP_CONFIG, DEFAULT_READ_CATEGORIES,
-  inputSourceWorker, expertWorker, groupChatWorker, outputWorker
+  inputSourceWorker, expertWorker, groupChatWorker, outputWorker, judgmentWorker
 } from './pipeline-workers';
 
 // ======================== 事件类型 ========================
@@ -24,7 +24,7 @@ export interface PipelineEventV2 {
 
 interface InternalNode {
   id: string;
-  type: 'input' | 'expert' | 'group_chat' | 'output';
+  type: 'input' | 'expert' | 'group_chat' | 'output' | 'judgment';
   expertId: string;
   role: ExpertRole;
   containerId?: string;
@@ -34,6 +34,7 @@ interface InternalNode {
   children?: string[];
   containerConfig?: ContainerConfig;
   childrenRoles?: Map<string, ExpertRole>;
+  outputPorts?: OutputPort[];
 }
 
 // ======================== 引擎类 ========================
@@ -46,6 +47,7 @@ export class ObjectPipelineEngine {
   private state: 'idle' | 'running' | 'completed' | 'stopped' = 'idle';
   private stopRequested: boolean = false;
   private pendingFeedback: Map<string, string[]> = new Map();
+  private edgePorts: Map<string, string> = new Map();
   private activeQueues: Map<string, AsyncQueue<PipelineObject>> | null = null;
   private activeSharedState: WorkerSharedState | null = null;
   private activeEventBus: AsyncQueue<PipelineEventV2> | null = null;
@@ -139,7 +141,7 @@ export class ObjectPipelineEngine {
       if (!this.nodes.has(key)) {
         this.nodes.set(key, {
           id: key,
-          type: 'expert',
+          type: (ec.nodeType as InternalNode['type']) || 'expert',
           expertId: ec.expertId,
           role: ec.role,
           containerId: ec.containerId,
@@ -158,6 +160,8 @@ export class ObjectPipelineEngine {
         if (sourceNode && targetNode) {
           if (!sourceNode.downstream.includes(target)) sourceNode.downstream.push(target);
           if (!targetNode.upstream.includes(source)) targetNode.upstream.push(source);
+          const edgeKey = `${source}->${target}`;
+          this.edgePorts.set(edgeKey, edge.sourcePort || 'default');
         }
       }
     }
@@ -312,15 +316,24 @@ export class ObjectPipelineEngine {
       const downQueues = downstreamMap.get(nodeId)!;
 
       let promise: Promise<void>;
+      const edgePortMap = new Map<string, string>();
+      for (const [edgeKey, port] of this.edgePorts) {
+        if (edgeKey.startsWith(`${nodeId}->`)) {
+          edgePortMap.set(edgeKey.replace(`${nodeId}->`, ''), port);
+        }
+      }
       switch (node.type) {
         case 'input':
-          promise = inputSourceWorker(nodeId, inQueue, downQueues, emit, sharedState, activeObjects);
+          promise = inputSourceWorker(nodeId, inQueue, downQueues, emit, sharedState, activeObjects, edgePortMap);
           break;
         case 'expert':
-          promise = expertWorker(nodeId, inQueue, downQueues, emit, sharedState);
+          promise = expertWorker(nodeId, inQueue, downQueues, emit, sharedState, edgePortMap);
           break;
         case 'group_chat':
-          promise = groupChatWorker(nodeId, inQueue, downQueues, emit, sharedState);
+          promise = groupChatWorker(nodeId, inQueue, downQueues, emit, sharedState, edgePortMap);
+          break;
+        case 'judgment':
+          promise = judgmentWorker(nodeId, inQueue, downQueues, emit, sharedState, edgePortMap);
           break;
         case 'output':
           promise = outputWorker(nodeId, inQueue, downQueues, emit, sharedState);

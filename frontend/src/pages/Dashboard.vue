@@ -16,7 +16,7 @@
         <div class="card-actions">
           <router-link :to="`/l1?projectId=${project.id}`" class="btn btn-primary">L1</router-link>
           <router-link :to="`/orchestrate?projectId=${project.id}`" class="btn btn-primary">编排</router-link>
-
+          <router-link :to="`/l3l4?projectId=${project.id}`" class="btn btn-primary">L3/L4</router-link>
           <router-link :to="`/worldbook?projectId=${project.id}`" class="btn btn-primary">世界书</router-link>
           <button class="btn btn-danger" @click="deleteProject(project.id)">删除</button>
         </div>

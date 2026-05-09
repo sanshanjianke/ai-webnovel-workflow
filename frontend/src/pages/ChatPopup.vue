@@ -3,6 +3,7 @@
     <!-- 顶部工具栏 -->
     <div class="popup-header">
       <h2>{{ title }}</h2>
+      <span class="popup-layer-badge" v-if="layer === 'l3l4'">L3/L4</span>
       <span class="popup-type-badge">{{ nodeTypeLabel }}</span>
       <span class="popup-status running" v-if="isRunning">● 运行中</span>
       <span class="popup-status stopped" v-else>已完成</span>
@@ -47,40 +48,55 @@
         </div>
       </div>
 
-      <!-- 专家节点：三栏布局 -->
+      <!-- 专家节点 -->
       <template v-else-if="nodeType === 'expert'">
-        <!-- 中栏：迭代日志 + 输入框 -->
-        <div class="center-panel">
-          <div class="chat-messages" ref="msgEl">
-            <div v-if="rounds.length === 0" class="empty-hint">
-              等待消息...<br><small>在编排画布上运行管道后，消息将在此显示</small>
-            </div>
-            <RoundCard v-for="(r, idx) in rounds" :key="idx" :round="r" />
-          </div>
-          <div class="input-area">
-            <textarea
-              v-model="userInput"
-              class="input-textarea"
-              placeholder="输入反馈或修改意见... (Enter 发送，Shift+Enter 换行)"
-              rows="2"
-              @keydown.enter.exact.prevent="sendFeedback"
-              :disabled="!isRunning || waitingForUser"
-            ></textarea>
-            <div class="input-actions">
-              <button class="btn btn-primary" @click="sendFeedback" :disabled="!isRunning || !userInput.trim()">
-                发送
-              </button>
-              <button class="btn btn-warning" @click="acceptAndStop" :disabled="!isRunning">
-                采纳当前产出并停止
-              </button>
-            </div>
-          </div>
-        </div>
 
-        <!-- 右栏：文件队列 + 报告预览 -->
-        <div class="right-panel">
-          <!-- 文件队列 -->
-          <div class="file-queue">
+        <!-- ═══ L3/L4 四栏布局 ═══ -->
+        <template v-if="layer === 'l3l4'">
+          <!-- 中左栏：编辑区（产出报告，含标签色块渲染） -->
+          <div class="l3l4-editor-panel">
+            <div class="panel-header">✍️ {{ currentExpert || '产出报告' }}</div>
+            <div v-if="currentReport" class="editor-content" v-html="renderTaggedText(currentReport)"></div>
+            <div v-else-if="isRunning" class="editor-placeholder">产出中...</div>
+            <div v-else class="editor-placeholder">等待运行...</div>
+            <div class="editor-actions" v-if="currentReport">
+              <button class="btn btn-sm" @click="downloadReport">📥 下载</button>
+              <button class="btn btn-sm" @click="transferReportToLibrary">📚 导入文档库</button>
+            </div>
+          </div>
+
+          <!-- 拖拽手柄：编辑区 ↔ 聊天区 -->
+          <div class="resize-handle" @mousedown="startResize('chat')"></div>
+
+          <!-- 中右栏：聊天输出 -->
+          <div class="l3l4-chat-panel" :style="{ width: chatPanelWidth + 'px' }">
+            <div class="chat-messages" ref="msgEl">
+              <div v-if="rounds.length === 0" class="empty-hint small">
+                等待消息...<br><small>运行管道后消息在此显示</small>
+              </div>
+              <RoundCard v-for="(r, idx) in rounds" :key="idx" :round="r" />
+            </div>
+            <!-- 产出摘要 -->
+            <div v-if="tagSummary.text" class="tag-summary">
+              <div class="summary-line">{{ tagSummary.text }}</div>
+              <div class="summary-tags">
+                <span v-for="(c, cat) in tagSummary.byCategory" :key="cat" class="summary-badge" :style="{ background: catColor(cat) }">
+                  {{ c }}个{{ cat }}标签
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 拖拽手柄：聊天区 ↔ 右侧栏 -->
+          <div class="resize-handle" @mousedown="startResize('right')"></div>
+
+          <!-- 标签库容器（独立） -->
+          <div class="l3l4-taglib-container" :style="{ width: rightPanelWidth + 'px' }">
+            <TagLibrary ref="taglibRef" />
+          </div>
+
+          <!-- 对象文件容器（独立，标签库折叠时显示） -->
+          <div class="l3l4-file-queue" :style="{ width: rightPanelWidth + 'px' }" v-show="taglibRef?.isCollapsed">
             <div class="panel-header">
               📋 对象文件
               <span v-if="fileQueue.length > 0" class="queue-count">{{ fileQueue.length }}</span>
@@ -89,25 +105,72 @@
             <div v-for="(file, idx) in fileQueue" :key="idx" class="queue-item" @dblclick="previewContent(file)" :title="'双击查看内容'">
               <span class="file-icon-s">📄</span>
               <span class="queue-filename">{{ file.name }}</span>
-              <span class="file-size-s" v-if="file.size">{{ formatSize(file.size) }}</span>
             </div>
             <div class="queue-progress" v-if="queueProgress.total > 0">
               进度: {{ queueProgress.done }}/{{ queueProgress.total }}
             </div>
           </div>
+        </template>
 
-          <!-- 报告预览 -->
-          <div class="report-preview">
-            <div class="panel-header">📝 产出报告</div>
-            <div v-if="currentReport" class="report-content" v-html="renderMarkdown(currentReport)"></div>
-            <div v-else-if="isRunning" class="report-placeholder">产出中...</div>
-            <div v-else class="report-placeholder">等待运行...</div>
-            <div class="report-actions" v-if="currentReport">
-              <button class="btn btn-sm" @click="downloadReport">📥 下载</button>
-              <button class="btn btn-sm" @click="transferReportToLibrary">📚 导入文档库</button>
+        <!-- ═══ L2 三栏布局（原布局） ═══ -->
+        <template v-else>
+          <!-- 中栏：迭代日志 + 输入框 -->
+          <div class="center-panel">
+            <div class="chat-messages" ref="msgEl">
+              <div v-if="rounds.length === 0" class="empty-hint">
+                等待消息...<br><small>在编排画布上运行管道后，消息将在此显示</small>
+              </div>
+              <RoundCard v-for="(r, idx) in rounds" :key="idx" :round="r" />
+            </div>
+            <div class="input-area">
+              <textarea
+                v-model="userInput"
+                class="input-textarea"
+                placeholder="输入反馈或修改意见... (Enter 发送，Shift+Enter 换行)"
+                rows="2"
+                @keydown.enter.exact.prevent="sendFeedback"
+                :disabled="!isRunning || waitingForUser"
+              ></textarea>
+              <div class="input-actions">
+                <button class="btn btn-primary" @click="sendFeedback" :disabled="!isRunning || !userInput.trim()">
+                  发送
+                </button>
+                <button class="btn btn-warning" @click="acceptAndStop" :disabled="!isRunning">
+                  采纳当前产出并停止
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+
+          <!-- 右栏：文件队列 + 报告预览 -->
+          <div class="right-panel">
+            <div class="file-queue">
+              <div class="panel-header">
+                📋 对象文件
+                <span v-if="fileQueue.length > 0" class="queue-count">{{ fileQueue.length }}</span>
+              </div>
+              <div v-if="fileQueue.length === 0" class="empty-hint small">暂无对象</div>
+              <div v-for="(file, idx) in fileQueue" :key="idx" class="queue-item" @dblclick="previewContent(file)" :title="'双击查看内容'">
+                <span class="file-icon-s">📄</span>
+                <span class="queue-filename">{{ file.name }}</span>
+                <span class="file-size-s" v-if="file.size">{{ formatSize(file.size) }}</span>
+              </div>
+              <div class="queue-progress" v-if="queueProgress.total > 0">
+                进度: {{ queueProgress.done }}/{{ queueProgress.total }}
+              </div>
+            </div>
+            <div class="report-preview">
+              <div class="panel-header">📝 产出报告</div>
+              <div v-if="currentReport" class="report-content" v-html="renderMarkdown(currentReport)"></div>
+              <div v-else-if="isRunning" class="report-placeholder">产出中...</div>
+              <div v-else class="report-placeholder">等待运行...</div>
+              <div class="report-actions" v-if="currentReport">
+                <button class="btn btn-sm" @click="downloadReport">📥 下载</button>
+                <button class="btn btn-sm" @click="transferReportToLibrary">📚 导入文档库</button>
+              </div>
+            </div>
+          </div>
+        </template>
       </template>
 
       <!-- 群聊节点：委托给 GroupChatView -->
@@ -120,8 +183,31 @@
       />
     </div>
 
-    <!-- 状态栏 -->
-    <div class="status-bar" v-if="nodeType !== 'inputSource' && nodeType !== 'output'">
+    <!-- L3/L4 底部决策栏 -->
+    <div class="l3l4-decision-bar" v-if="layer === 'l3l4' && nodeType === 'expert'">
+      <textarea
+        v-model="userInput"
+        class="decision-input"
+        placeholder="输入反馈或修改意见... (Enter 发送，Shift+Enter 换行)"
+        rows="2"
+        @keydown.enter.exact.prevent="sendFeedback"
+        :disabled="!isRunning"
+      ></textarea>
+      <div class="decision-buttons">
+        <button class="btn btn-primary" @click="sendFeedback" :disabled="!isRunning || !userInput.trim()">发送</button>
+        <button class="btn btn-pass" @click="verdictPass" :disabled="!isRunning" title="通过当前产出">✓ 通过</button>
+        <button class="btn btn-reject" @click="verdictReject" :disabled="!isRunning" title="打回重做">✗ 打回</button>
+      </div>
+      <div class="decision-status">
+        <span v-if="objectInfo.current > 0">对象: {{ objectInfo.current }}/{{ objectInfo.total }}</span>
+        <span v-if="isRunning" class="popup-status running">⏳ 运行中</span>
+        <span v-else class="popup-status stopped">已完成</span>
+        <span v-if="roundInfo.current > 0">轮次: 第 {{ roundInfo.current }}/{{ roundInfo.total }} 轮</span>
+      </div>
+    </div>
+
+    <!-- L2 状态栏 -->
+    <div class="status-bar" v-else-if="nodeType !== 'inputSource' && nodeType !== 'output'">
       <template v-if="nodeType === 'container'">
         <span v-if="objectInfo.current > 0">对象 {{ objectInfo.current }}/{{ objectInfo.total }}</span>
         <span v-if="groupStatus.currentExpert">· {{ groupStatus.currentExpert }}</span>
@@ -159,6 +245,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import DocumentSidebar from '../components/library/DocumentSidebar.vue'
+import TagLibrary from '../components/library/TagLibrary.vue'
 import RoundCard from '../components/RoundCard.vue'
 import GroupChatView from '../components/GroupChatView.vue'
 import JSZip from 'jszip'
@@ -170,8 +257,60 @@ const md = new MarkdownIt()
 const targetId = computed(() => route.query.containerId || route.query.expertId || 'solo')
 const projectId = computed(() => route.query.projectId || '')
 const nodeType = computed(() => route.query.nodeType || 'expert')
+const layer = computed(() => route.query.layer || 'l2')
+
+const taglibRef = ref(null)
+
+// ── L3/L4 面板拖拽宽度 ──
+const chatPanelWidth = ref(320)
+const rightPanelWidth = ref(260)
+const resizing = ref(null) // 'chat' | 'right' | null
+let resizeStartX = 0
+let resizeStartWidth = 0
+
+function startResize(which) {
+  resizing.value = which
+  resizeStartX = 0 // 在第一次 mousemove 时初始化
+  resizeStartWidth = which === 'chat' ? chatPanelWidth.value : rightPanelWidth.value
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+
+function onResize(e) {
+  if (!resizing.value) return
+  if (resizeStartX === 0) resizeStartX = e.clientX
+  const delta = e.clientX - resizeStartX
+
+  if (resizing.value === 'chat') {
+    // 右拖边界右移→编辑区扩展→聊天区收缩
+    chatPanelWidth.value = Math.max(200, Math.min(500, resizeStartWidth - delta))
+  } else if (resizing.value === 'right') {
+    // 右拖边界右移→聊天区扩展→右侧栏收缩
+    rightPanelWidth.value = Math.max(180, Math.min(400, resizeStartWidth - delta))
+  }
+}
+
+function stopResize() {
+  resizing.value = null
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+}
+
+onMounted(() => {
+  document.addEventListener('mousemove', onResize)
+  document.addEventListener('mouseup', stopResize)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('mousemove', onResize)
+  document.removeEventListener('mouseup', stopResize)
+})
 const title = computed(() => route.query.name || (targetId.value === 'solo' ? '主聊天' : targetId.value))
 const nodeTypeLabel = computed(() => {
+  if (layer.value === 'l3l4') {
+    const l3l4Labels = { expert: 'L3/L4 标签专家', container: 'L3/L4 群聊', inputSource: '输入源', output: '输出' }
+    return l3l4Labels[nodeType.value] || 'L3/L4 节点'
+  }
   const labels = { expert: '专家', container: '群聊', inputSource: '输入源', output: '输出' }
   return labels[nodeType.value] || '节点'
 })
@@ -235,6 +374,69 @@ function getIcon(expertType) {
   return icons[expertType] || '📄'
 }
 function renderMarkdown(text) { return text ? md.render(text) : '' }
+
+// ── L3/L4 标签色块渲染 ──
+const tagCategoryColors = { '情节': '#3498db', '人物': '#2ecc71', '叙事': '#9b59b6', '爽点': '#e67e22' }
+function catColor(cat) { return tagCategoryColors[cat] || '#999' }
+
+function renderTaggedText(text) {
+  if (!text) return ''
+  // 先将 【分类:标签名】 渲染为内联色块
+  let html = md.render(text)
+  html = html.replace(/【(.+?)】/g, (match, inner) => {
+    const parts = inner.split(':')
+    const cat = parts.length > 1 ? parts[0] : ''
+    const color = tagCategoryColors[cat] || '#888'
+    return `<span class="inline-tag" style="background:${color}20;color:${color};border:1px solid ${color}40" title="${inner}">${inner}</span>`
+  })
+  return html
+}
+
+// ── 标签产出摘要 ──
+const tagSummary = computed(() => {
+  const report = currentReport.value || ''
+  const matches = report.match(/【(.+?)】/g) || []
+  const byCategory = {}
+  for (const m of matches) {
+    const inner = m.slice(1, -1)
+    const cat = inner.includes(':') ? inner.split(':')[0] : '其他'
+    byCategory[cat] = (byCategory[cat] || 0) + 1
+  }
+  const total = matches.length
+  return {
+    text: total > 0 ? `✅ 插入 ${total} 个标签` : '',
+    byCategory,
+    total
+  }
+})
+
+// ── L3/L4 决断按钮 ──
+async function verdictPass() {
+  try {
+    await axios.post(`/api/projects/${projectId.value}/meeting/feedback`, {
+      meetingId: meetingId.value,
+      expertId: currentExpertId.value || targetId.value,
+      action: 'pass',
+      verdict: 'pass'
+    })
+    userInput.value = ''
+  } catch (err) { console.error('Verdict pass error:', err) }
+}
+
+async function verdictReject() {
+  const reason = userInput.value.trim() || '打回重做'
+  try {
+    await axios.post(`/api/projects/${projectId.value}/meeting/feedback`, {
+      meetingId: meetingId.value,
+      expertId: currentExpertId.value || targetId.value,
+      action: 'reject',
+      verdict: 'reject',
+      message: reason
+    })
+    userInput.value = ''
+  } catch (err) { console.error('Verdict reject error:', err) }
+}
+
 function previewContent(file) {
   previewFile.value = file
   showPreview.value = true
@@ -831,6 +1033,14 @@ onUnmounted(() => {
 }
 
 /* ── 徽章、状态等 ── */
+.popup-layer-badge {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #f59e0b;
+}
 .popup-type-badge {
   font-size: 0.7rem;
   padding: 2px 8px;
@@ -939,5 +1149,220 @@ onUnmounted(() => {
 .preview-content {
   line-height: 1.8;
   font-size: 0.9rem;
+}
+
+/* ═══ L3/L4 四栏布局 ═══ */
+.l3l4-editor-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid #e0e0e0;
+  background: white;
+}
+.l3l4-editor-panel .panel-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid #eee;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #555;
+  flex-shrink: 0;
+}
+.editor-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 16px;
+  font-size: 0.85rem;
+  line-height: 1.9;
+}
+.editor-placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #bbb;
+  font-size: 0.8rem;
+  font-style: italic;
+}
+.editor-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid #eee;
+  flex-shrink: 0;
+}
+
+/* 内联标签色块 */
+:deep(.inline-tag) {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  margin: 0 1px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+:deep(.inline-tag:hover) {
+  filter: brightness(0.9);
+  transform: scale(1.05);
+}
+
+/* L3/L4 聊天面板（中右） */
+.l3l4-chat-panel {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid #e0e0e0;
+  background: #fafafa;
+}
+.l3l4-chat-panel .chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+}
+.l3l4-chat-panel .empty-hint.small {
+  padding: 1.5rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+/* 标签产出摘要 */
+.tag-summary {
+  padding: 8px 10px;
+  border-top: 1px solid #e8e8e8;
+  background: #f0f9f0;
+  flex-shrink: 0;
+}
+.summary-line {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #27ae60;
+  margin-bottom: 4px;
+}
+.summary-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.summary-badge {
+  font-size: 0.65rem;
+  color: white;
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+/* L3/L4 标签库独立容器 */
+.l3l4-taglib-container {
+  flex-shrink: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* L3/L4 对象文件独立容器 */
+.l3l4-file-queue {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 10px;
+  background: #fafafa;
+}
+
+/* L3/L4 底部决策栏 */
+.l3l4-decision-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: white;
+  border-top: 2px solid #e0e0e0;
+  flex-shrink: 0;
+}
+.decision-input {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  resize: none;
+  outline: none;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.decision-input:focus { border-color: #3498db; box-shadow: 0 0 0 2px rgba(52,152,219,0.15); }
+.decision-input:disabled { background: #f5f5f5; color: #999; }
+
+.decision-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.btn-pass {
+  background: #27ae60;
+  color: white;
+  border-color: #27ae60;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.btn-pass:hover:not(:disabled) { background: #219a52; }
+.btn-reject {
+  background: #e74c3c;
+  color: white;
+  border-color: #e74c3c;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.btn-reject:hover:not(:disabled) { background: #c0392b; }
+
+.decision-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.72rem;
+  color: #888;
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* 拖拽分隔条 */
+.resize-handle {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s;
+  position: relative;
+  z-index: 10;
+}
+.resize-handle:hover,
+.resize-handle:active {
+  background: #3498db;
+}
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  inset: 0 -3px;
+}
+
+/* L3/L4 popup-body 不换行 */
+.chat-popup .popup-body {
+  flex-wrap: nowrap;
 }
 </style>

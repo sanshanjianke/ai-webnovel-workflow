@@ -68,6 +68,29 @@ async function waitIfPaused(state: WorkerSharedState): Promise<void> {
   }
 }
 
+/** 端口感知分发 + reject 循环保护 */
+async function dispatchToDownstream(
+  nodeId: string,
+  obj: PipelineObject,
+  downstreamQueues: Map<string, AsyncQueue<PipelineObject>>,
+  edgePortMap: Map<string, string>
+): Promise<void> {
+  if (!obj.meta) obj.meta = { rejectCount: 0, maxRejects: 3 };
+  if (obj.meta.routePort === 'reject') {
+    obj.meta.rejectCount++;
+    if (obj.meta.rejectCount > obj.meta.maxRejects) {
+      obj.meta.routePort = 'pass';
+    }
+  }
+  const routePort = obj.meta.routePort || 'default';
+  for (const [downId, downQueue] of downstreamQueues) {
+    const edgePort = edgePortMap.get(downId) || 'default';
+    if (edgePort === routePort) {
+      await downQueue.enqueue(obj);
+    }
+  }
+}
+
 // ======================== 处理函数（产生 SSE 事件，通过 emit 回调交出） ========================
 
 async function processAgentNode(
@@ -399,7 +422,8 @@ export async function inputSourceWorker(
   downstreamQueues: Map<string, AsyncQueue<PipelineObject>>,
   emit: (event: PipelineEventV2) => void,
   state: WorkerSharedState,
-  initialObjects: PipelineObject[]
+  initialObjects: PipelineObject[],
+  _edgePortMap: Map<string, string> = new Map()
 ): Promise<void> {
   // 1. 分发初始对象
   for (const obj of initialObjects) {
@@ -436,7 +460,8 @@ export async function expertWorker(
   inputQueue: AsyncQueue<PipelineObject>,
   downstreamQueues: Map<string, AsyncQueue<PipelineObject>>,
   emit: (event: PipelineEventV2) => void,
-  state: WorkerSharedState
+  state: WorkerSharedState,
+  edgePortMap: Map<string, string> = new Map()
 ): Promise<void> {
   const config = state.nodeConfigs.get(nodeId);
   if (!config) return;
@@ -465,9 +490,7 @@ export async function expertWorker(
       obj.completedAt = new Date().toISOString();
     }
 
-    for (const [, downQueue] of downstreamQueues) {
-      await downQueue.enqueue(obj);
-    }
+    await dispatchToDownstream(nodeId, obj, downstreamQueues, edgePortMap);
   }
 }
 
@@ -479,7 +502,8 @@ export async function groupChatWorker(
   inputQueue: AsyncQueue<PipelineObject>,
   downstreamQueues: Map<string, AsyncQueue<PipelineObject>>,
   emit: (event: PipelineEventV2) => void,
-  state: WorkerSharedState
+  state: WorkerSharedState,
+  edgePortMap: Map<string, string> = new Map()
 ): Promise<void> {
   while (!state.stopRequested) {
     await waitIfPaused(state);
@@ -501,9 +525,7 @@ export async function groupChatWorker(
       obj.completedAt = new Date().toISOString();
     }
 
-    for (const [, downQueue] of downstreamQueues) {
-      await downQueue.enqueue(obj);
-    }
+    await dispatchToDownstream(nodeId, obj, downstreamQueues, edgePortMap);
   }
 }
 
@@ -542,5 +564,94 @@ export async function outputWorker(
         }))
       }
     });
+  }
+}
+
+/**
+ * 判断节点 Worker
+ * 轻量 LLM 调用，判断产出是否合格，设置 routePort。
+ */
+export async function judgmentWorker(
+  nodeId: string,
+  inputQueue: AsyncQueue<PipelineObject>,
+  downstreamQueues: Map<string, AsyncQueue<PipelineObject>>,
+  emit: (event: PipelineEventV2) => void,
+  state: WorkerSharedState,
+  edgePortMap: Map<string, string> = new Map()
+): Promise<void> {
+  while (!state.stopRequested) {
+    await waitIfPaused(state);
+    if (state.stopRequested) break;
+
+    const obj = inputQueue.dequeueSync();
+    if (!obj) {
+      await sleep(1000);
+      continue;
+    }
+
+    obj.status = 'running';
+    obj.currentNodeId = nodeId;
+
+    emit({
+      type: 'judgment_start',
+      data: { nodeId, objectId: obj.id, objectName: obj.name }
+    });
+
+    try {
+      // 构建审核上下文
+      const reports = obj.files.filter(f => f.category === 'report');
+      const reportText = reports.map(r => r.content).join('\n\n');
+      const inputFiles = obj.files.filter(f => f.category === 'input');
+
+      // 调 LLM 判断
+      const llm = await import('./llm');
+      const provider = llm.getLLM();
+      const reviewPrompt = `你是一位严格的审稿编辑。请审查以下产出是否合格。
+
+## 输入文件
+${inputFiles.map(f => `### ${f.path}\n${f.content}`).join('\n\n')}
+
+## 专家产出
+${reportText || '（无产出）'}
+
+请以 JSON 格式给出判断：{"verdict":"pass"|"reject","reason":"一句话说明理由"}`;
+
+      let verdict: 'pass' | 'reject' = 'pass';
+      let reason = 'No LLM configured, defaulting to pass';
+      try {
+        const response = await provider.invoke(reviewPrompt, { temperature: 0.3 });
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const result = JSON.parse(jsonMatch[0]);
+          verdict = result.verdict === 'reject' ? 'reject' : 'pass';
+          reason = result.reason || reason;
+        }
+      } catch {
+        // LLM 调用失败，默认通过
+      }
+
+      if (!obj.meta) obj.meta = { rejectCount: 0, maxRejects: 3 };
+      obj.meta.routePort = verdict;
+
+      emit({
+        type: 'judgment_complete',
+        data: {
+          nodeId, objectId: obj.id, objectName: obj.name,
+          verdict, reason, rejectCount: obj.meta.rejectCount
+        }
+      });
+    } catch (err: any) {
+      emit({
+        type: 'judgment_error',
+        data: { nodeId, objectId: obj.id, objectName: obj.name, error: err.message }
+      });
+      if (!obj.meta) obj.meta = { rejectCount: 0, maxRejects: 3 };
+      obj.meta.routePort = 'pass';
+    }
+
+    obj.status = 'completed';
+    obj.completedAt = new Date().toISOString();
+
+    await dispatchToDownstream(nodeId, obj, downstreamQueues, edgePortMap);
   }
 }

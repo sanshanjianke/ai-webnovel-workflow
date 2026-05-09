@@ -1,11 +1,12 @@
 <template>
   <div class="orchestration-page">
     <div class="canvas-full">
-      <OrchestrationCanvas 
-        :projectId="projectId" 
+      <OrchestrationCanvas
+        :projectId="projectId"
         :isRunning="isRunning"
         :isPaused="isPaused"
         :pipelineOutput="pipelineOutput"
+        :layer="layer"
         @run="onRun"
         @stop="stopMeeting"
         @toggle-pause="togglePause"
@@ -27,6 +28,7 @@ import OrchestrationCanvas from '../components/OrchestrationCanvas.vue'
 
 const route = useRoute()
 const projectId = computed(() => route.query.projectId || '')
+const layer = computed(() => route.meta.layer || 'l2')
 
 // 从 sessionStorage 恢复状态
 const isRunning = ref(sessionStorage.getItem('meetingRunning') === 'true')

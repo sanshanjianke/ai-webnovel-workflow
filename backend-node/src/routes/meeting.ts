@@ -187,6 +187,7 @@ export function registerMeetingRoutes(app: Express): void {
         customPrompt: (e.customPrompt || e.custom_prompt) as string | undefined,
         containerId: (e.containerId || e.container_id) as string | undefined,
         nodeId: (e.nodeId || e.node_id) as string | undefined,
+        nodeType: (e.nodeType || e.node_type) as string | undefined,
         interruptMode: (e.interruptMode || e.interrupt_mode || 'every_n_msgs') as 'auto' | 'every_n_msgs' | 'every_n_tokens' | 'on_mention',
         interruptThreshold: (e.interruptThreshold || e.interrupt_threshold || 1) as number
       })),

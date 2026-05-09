@@ -26,7 +26,8 @@
         />
       </div>
       
-      <div v-if="loading" class="loading">加载中...</div>
+      <div v-if="!hasProject" class="loading">请先选择项目</div>
+      <div v-else-if="loading" class="loading">加载中...</div>
       
       <div v-else class="document-tree" 
         @contextmenu.prevent="showDirContext($event, '/')"
@@ -711,7 +712,10 @@ const handleImport = async (event) => {
   event.target.value = ''
 }
 
+const hasProject = computed(() => !!props.projectId)
+
 const refresh = async () => {
+  if (!hasProject.value) return
   loading.value = true
   try {
     const res = await fetch(`${apiBase.value}`)
@@ -719,7 +723,7 @@ const refresh = async () => {
     documents.value = data.documents || []
     directories.value = data.directories || ['/']
     activeDocs.value = data.active_docs || {}
-    
+
     for (const dir of directories.value) {
       if (!expandedDirs.value.has(dir)) {
         expandedDirs.value.add(dir)

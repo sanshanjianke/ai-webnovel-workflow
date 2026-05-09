@@ -16,12 +16,14 @@ import ViewerPage from './pages/ViewerPage.vue'
 const routes = [
   { path: '/', component: Dashboard },
   { path: '/l1', component: L1Seed },
-  { path: '/orchestrate', component: Orchestration },
+  { path: '/orchestrate', component: Orchestration, meta: { layer: 'l2' } },
+  { path: '/l3l4', component: Orchestration, meta: { layer: 'l3l4' } },
 
   { path: '/worldbook', component: WorldBook },
   { path: '/library', component: Library },
   { path: '/settings', component: Settings },
   { path: '/chat-popup', component: ChatPopup },
+  { path: '/l3l4-chat', component: ChatPopup },
   { path: '/output', component: OutputPage },
   { path: '/view', component: ViewerPage }
 ]

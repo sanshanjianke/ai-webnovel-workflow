@@ -20,7 +20,8 @@ export function createPipelineObject(
     name,
     files,
     status: 'pending',
-    startedAt: new Date().toISOString()
+    startedAt: new Date().toISOString(),
+    meta: { rejectCount: 0, maxRejects: 3 }
   };
 }
 
