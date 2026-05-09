@@ -192,19 +192,25 @@ describe('WorldBook 注入链路', () => {
     expect(reloadedB.listAllEntries()[0].content).toBe('来自书B');
   });
 
-  it('4. resolveWorldbook 逻辑：绑定节点取特定书，未绑定走回退', () => {
-    const worldbookMap = new Map<string, string>();
+  it('4. resolveWorldbook 逻辑：绑定节点取特定书的条目', () => {
+    const bookA = store.getBook(store.createBook('书A').bookId)!;
+    bookA.createEntry({ id: 'a1', keys: ['hello'], content: '来自书A的内容' });
+    const bookB = store.getBook(store.createBook('书B').bookId)!;
+    bookB.createEntry({ id: 'b1', keys: ['world'], content: '来自书B的内容' });
+
+    const entries = new Map<string, WorldBookEntry[]>();
+    entries.set(bookA.getInfo().bookId, bookA.listAllEntries());
+    entries.set(bookB.getInfo().bookId, bookB.listAllEntries());
+
     const perNodeWorldBook = new Map<string, string>();
+    perNodeWorldBook.set('node_1', bookA.getInfo().bookId);
 
-    worldbookMap.set('book_a', '书A内容：hello-from-a');
-    worldbookMap.set('book_b', '书B内容：hello-from-b');
-    perNodeWorldBook.set('node_1', 'book_a');
-
-    // 已绑定的 node_1 → book_a
+    // 已绑定的 node_1 → bookA 的条目
     const boundId = perNodeWorldBook.get('node_1')!;
-    expect(worldbookMap.get(boundId)).toContain('hello-from-a');
+    expect(entries.get(boundId)!.length).toBe(1);
+    expect(entries.get(boundId)![0].content).toContain('来自书A');
 
-    // 未绑定的 node_2 → undefined（fallback）
+    // 未绑定的 node_2 → undefined
     expect(perNodeWorldBook.get('node_2')).toBeUndefined();
   });
 
@@ -224,34 +230,37 @@ describe('WorldBook 注入链路', () => {
     expect(prompt).not.toContain('暂无');
   });
 
-  it('6. 完整链路：store → entries → map → resolve → prompt', async () => {
+  it('6. 完整链路：store → entries → 关键词过滤 → prompt', async () => {
     setLLM(new MockLLM('测试响应'));
 
-    // Step 1: 创建书，写条目
-    const info = store.createBook('完整链路测试');
+    // Step 1: 创建书，写两个条目（一个应命中，一个不应命中）
+    const info = store.createBook('过滤测试书');
     const book = store.getBook(info.bookId)!;
     book.createEntry({
-      id: 'full_1', keys: ['test'], content: '链路验证码：888',
+      id: 'match_1', keys: ['test'], content: '命中条目：验证码888',
+      priority: 10
+    });
+    book.createEntry({
+      id: 'no_match', keys: ['job'], content: '不应命中的条目：验证码999',
       priority: 10
     });
 
-    // Step 2: 构建 worldbookMap（模拟 pipeline 加载）
-    const worldbookMap = new Map<string, string>();
-    const text = book.listAllEntries()
-      .map(e => `${e.keys?.[0] || ''}: ${e.content || ''}`)
-      .join('\n');
-    worldbookMap.set(info.bookId, text);
+    // Step 2: 模拟 resolveWorldbook 的关键词过滤
+    const entries = book.listAllEntries();
+    const contextTokens = ['这是', '一个', 'test', '关键词', '测试'];
+    const active = entries.filter(e => {
+      if (e.constant) return true;
+      return e.keys.some(key =>
+        contextTokens.some(t => t.toLowerCase().includes(key.toLowerCase()))
+      );
+    });
+    const resolvedText = active.map(e => `${e.keys?.[0] || e.id}: ${e.content}`).join('\n');
 
-    // Step 3: 构建 perNodeWorldBook（模拟前端 binding）
-    const perNodeWorldBook = new Map<string, string>();
-    perNodeWorldBook.set('node_1', info.bookId);
+    // Step 3: 只应有 test 条目，不应有 job 条目
+    expect(resolvedText).toContain('验证码888');
+    expect(resolvedText).not.toContain('验证码999');
 
-    // Step 4: resolve
-    const boundBookId = perNodeWorldBook.get('node_1')!;
-    const resolvedText = worldbookMap.get(boundBookId)!;
-    expect(resolvedText).toContain('验证码：888');
-
-    // Step 5: 注入 ExpertContext → buildPrompt
+    // Step 4: 注入 ExpertContext → buildPrompt
     const context: ExpertContext = {
       vision: {},
       worldbook: resolvedText,
@@ -261,7 +270,8 @@ describe('WorldBook 注入链路', () => {
     const expert = createExpert('senior_author_v1', ExpertRole.MAIN, Granularity.CHAPTER);
     const { prompt } = expert.buildPrompt(context);
 
-    expect(prompt).toContain('验证码：888');
+    expect(prompt).toContain('验证码888');
+    expect(prompt).not.toContain('验证码999');
   });
 
   it('7. 没有 worldbook 时 prompt 显示暂无', async () => {
@@ -296,9 +306,9 @@ describe('Meeting route → Pipeline 世界书衔接', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  // 模拟 meeting route 中 worldbookMap 构建逻辑
-  function buildWorldbookMap(projectPath: string): Map<string, string> {
-    const worldbookMap = new Map<string, string>();
+  // 模拟 meeting route 中 worldbookEntries 构建逻辑
+  function buildWorldbookEntries(projectPath: string): Map<string, WorldBookEntry[]> {
+    const entries = new Map<string, WorldBookEntry[]>();
     const worldbooksDir = path.join(projectPath, 'worldbooks');
     try {
       if (fs.existsSync(worldbooksDir)) {
@@ -307,88 +317,93 @@ describe('Meeting route → Pipeline 世界书衔接', () => {
           const bookId = file.replace('.json', '');
           try {
             const wb = JSON.parse(fs.readFileSync(path.join(worldbooksDir, file), 'utf-8'));
-            const entries = wb.entries || {};
-            worldbookMap.set(bookId, Object.values(entries)
-              .map((e: any) => `${e.keys?.[0] || ''}: ${e.content || ''}`)
-              .join('\n'));
+            entries.set(bookId, Object.values(wb.entries || {}) as WorldBookEntry[]);
           } catch {}
         }
       }
     } catch {}
-    return worldbookMap;
+    return entries;
   }
 
-  it('应该从磁盘加载世界书并正确 resolve', () => {
-    // Step 1: 创建项目目录和世界书
+  it('应该从磁盘加载世界书条目并做关键词过滤', () => {
+    // Step 1: 创建项目目录和世界书（两个条目）
     const worldbooksDir = path.join(tempDir, 'worldbooks');
     fs.mkdirSync(worldbooksDir, { recursive: true });
     fs.writeFileSync(path.join(worldbooksDir, 'default.json'), JSON.stringify({
       name: '默认书', entries: {
-        'entry_1': { id: 'entry_1', keys: ['test'], content: '测试内容：验证码999', priority: 10 }
+        'entry_1': { id: 'entry_1', keys: ['test'], content: '命中内容：验证码999', priority: 10 },
+        'entry_2': { id: 'entry_2', keys: ['job'], content: '不应命中的内容：验证码000', priority: 10 }
       }
     }, null, 2));
 
     // Step 2: 模拟 meeting route 加载
-    const worldbookMap = buildWorldbookMap(tempDir);
-    expect(worldbookMap.size).toBe(1);
-    expect(worldbookMap.get('default')).toContain('验证码999');
+    const entries = buildWorldbookEntries(tempDir);
+    expect(entries.size).toBe(1);
+    expect(entries.get('default')!.length).toBe(2);
 
-    // Step 3: 模拟前端发来的 worldbook_bindings
+    // Step 3: 模拟关键词过滤（只有 test，没有 job）
+    const contextTokens = '这是一个test关键词的测试'.split(/\s+/);
+    const active = entries.get('default')!.filter(e => {
+      if (e.constant) return true;
+      return e.keys.some(key =>
+        contextTokens.some(t => t.toLowerCase().includes(key.toLowerCase()))
+      );
+    });
+    expect(active.length).toBe(1);
+    expect(active[0].content).toContain('验证码999');
+    expect(active.map(e => e.content).join()).not.toContain('验证码000');
+
+    // Step 4: 验证 binding
     const perNodeWorldBook = new Map<string, string>();
-    perNodeWorldBook.set('node_1', 'default');   // 前端 VueFlow node.id
-
-    // Step 4: 模拟 resolveWorldbook (pipeline 内部用的 nodeId)
-    const pipelineNodeId = 'node_1';  // ec.nodeId from frontend expert config
-    const boundBookId = perNodeWorldBook.get(pipelineNodeId);
-    expect(boundBookId).toBe('default');
-    const text = worldbookMap.get(boundBookId!)!;
-    expect(text).toContain('验证码999');
+    perNodeWorldBook.set('node_1', 'default');
+    const boundId = perNodeWorldBook.get('node_1')!;
+    const bookEntries = entries.get(boundId)!;
+    expect(bookEntries.length).toBe(2);
   });
 
-  it('前端 node.id 应该和 pipeline 的 ec.nodeId 一致', async () => {
-    // 这个测试验证关键约定：前端 expertWorldBookBindings 的 key
-    // 必须和 pipeline 内部 resolveWorldbook 用的 nodeId 相同
-
-    const worldbooksDir = path.join(tempDir, 'worldbooks');
-    fs.mkdirSync(worldbooksDir, { recursive: true });
-    fs.writeFileSync(path.join(worldbooksDir, 'test_book.json'), JSON.stringify({
-      name: '测试书', entries: {
-        'e1': { id: 'e1', keys: ['hello'], content: '匹配内容：xyz789', priority: 10 }
-      }
-    }, null, 2));
-
-    const worldbookMap = buildWorldbookMap(tempDir);
-
-    // 模拟 pipeline buildGraph 中 nodeId 的赋值:
-    // const nodeId = ec.nodeId || ec.expertId
-    // const key = ec.containerId || nodeId
-
+  it('前端 node.id 应该和 pipeline 的 ec.nodeId 一致', () => {
     // 场景 1: 独立专家，ec.nodeId = 'node_1'
     let ec_nodeId = 'node_1';
     let key: string | null = null;
     key = ec_nodeId;  // ec.containerId is null, fallback to nodeId
     expect(key).toBe('node_1');
 
-    // 场景 2: 容器内专家 (synthetic)，ec.nodeId = 'container_1_exp_0'
+    // 场景 2: 容器内专家，key = containerId
     ec_nodeId = 'container_1_exp_0';
-    let ec_containerId = 'container_1';
+    const ec_containerId = 'container_1';
     key = ec_containerId || ec_nodeId;
     expect(key).toBe('container_1');
 
-    // 验证 perNodeWorldBook 用这些 key 能 match
+    // 验证 perNodeWorldBook 的 key 能匹配
     const perNodeWorldBook = new Map<string, string>();
-    perNodeWorldBook.set('node_1', 'test_book');      // 前端对独立专家的绑定
-    perNodeWorldBook.set('container_1', 'test_book'); // 前端对容器的绑定
+    perNodeWorldBook.set('node_1', 'book_x');
+    perNodeWorldBook.set('container_1', 'book_x');
+    expect(perNodeWorldBook.get('node_1')).toBe('book_x');
+    expect(perNodeWorldBook.get('container_1')).toBe('book_x');
+  });
 
-    // pipeline resolve 用正确的 key
-    expect(perNodeWorldBook.get('node_1')).toBe('test_book');
-    expect(perNodeWorldBook.get('container_1')).toBe('test_book');
+  it('关键词过滤：只匹配包含关键词的条目，不匹配的应被排除', () => {
+    const s = new WorldBookStore(tempDir);
+    const book = s.getBook(s.createBook('过滤书').bookId)!;
+    book.createEntry({ id: 'e1', keys: ['test'], content: 'test条目：码111', priority: 10 });
+    book.createEntry({ id: 'e2', keys: ['job'], content: 'job条目：码222', priority: 10 });
+    book.createEntry({ id: 'e3', keys: ['xyz'], content: 'xyz条目：码333', priority: 10 });
 
-    // 验证都能拿到正确内容
-    const text1 = worldbookMap.get(perNodeWorldBook.get('node_1')!)!;
-    expect(text1).toContain('xyz789');
+    const allEntries = book.listAllEntries();
+    const contextTokens = ['这里', '包含', 'test', '和', 'xyz'];
 
-    const text2 = worldbookMap.get(perNodeWorldBook.get('container_1')!)!;
-    expect(text2).toContain('xyz789');
+    // 过滤
+    const active = allEntries.filter((e: WorldBookEntry) => {
+      if (e.constant) return true;
+      if (e.disable) return false;
+      return e.keys.some((key: string) =>
+        contextTokens.some(t => t.toLowerCase().includes(key.toLowerCase()))
+      );
+    });
+
+    expect(active.length).toBe(2);
+    expect(active.map((e: WorldBookEntry) => e.id)).toContain('e1');
+    expect(active.map((e: WorldBookEntry) => e.id)).toContain('e3');
+    expect(active.map((e: WorldBookEntry) => e.id)).not.toContain('e2');
   });
 });

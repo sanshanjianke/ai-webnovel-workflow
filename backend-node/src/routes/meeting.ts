@@ -290,8 +290,8 @@ export function registerMeetingRoutes(app: Express): void {
           return createPipelineObject(fileName.replace(/\.[^.]+$/, ''), [{ path: fileName, content }])
         });
 
-        // 构建 per-book 世界书映射：加载所有书
-        const worldbookMap = new Map<string, string>();
+        // 构建 per-book 世界书映射：存储结构化条目用于关键词过滤
+        const worldbookEntries = new Map<string, any[]>();
         const perNodeWorldBook = new Map<string, string>();
         const worldbooksDir = `${project.path}/worldbooks`;
         try {
@@ -301,10 +301,8 @@ export function registerMeetingRoutes(app: Express): void {
               const bookId = file.replace('.json', '');
               try {
                 const wb = JSON.parse(fs.readFileSync(`${worldbooksDir}/${file}`, 'utf-8'));
-                const entries = wb.entries || {};
-                worldbookMap.set(bookId, Object.values(entries)
-                  .map((e: any) => `${e.keys?.[0] || ''}: ${e.content || ''}`)
-                  .join('\n'));
+                const rawEntries = wb.entries || {};
+                worldbookEntries.set(bookId, Object.values(rawEntries));
               } catch {}
             }
           }
@@ -323,7 +321,7 @@ export function registerMeetingRoutes(app: Express): void {
           worldbookText,
           '',
           undefined,
-          worldbookMap,
+          worldbookEntries,
           perNodeWorldBook
         )) {
           writer.write(event.type, event.data);

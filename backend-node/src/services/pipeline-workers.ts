@@ -28,6 +28,8 @@ export interface NodeWorkerConfig {
   containerConfig?: ContainerConfig;
 }
 
+import { WorldBookEntry } from '../protocols';
+
 export interface WorkerSharedState {
   stopRequested: boolean;
   pauseRequested: boolean;
@@ -35,9 +37,9 @@ export interface WorkerSharedState {
   globalConfig: MeetingConfig;
   feedbackMap: Map<string, string[]>;
   vision: Record<string, string>;
-  worldbook: string;                       // 向后兼容：所有书的合并文本
-  worldbookMap: Map<string, string>;       // bookId → 该书条目文本
-  perNodeWorldBook: Map<string, string>;   // nodeId → bookId 绑定
+  worldbook: string;                              // 向后兼容：所有书的合并文本
+  worldbookEntries: Map<string, WorldBookEntry[]>; // bookId → 条目数组（用于关键词过滤）
+  perNodeWorldBook: Map<string, string>;          // nodeId → bookId 绑定
   rag: string;
   outputSeq: { value: number };
 }
@@ -94,12 +96,51 @@ async function dispatchToDownstream(
 }
 
 /** 为指定节点解析世界书文本 */
-function resolveWorldbook(nodeId: string, state: WorkerSharedState): string {
+/** 获取指定书的条目文本，按上下文关键词过滤 */
+function resolveWorldbook(nodeId: string, contextTokens: string[], state: WorkerSharedState): string {
+  // 确定要用的书
   const boundBookId = state.perNodeWorldBook.get(nodeId);
-  if (boundBookId && state.worldbookMap.has(boundBookId)) {
-    return state.worldbookMap.get(boundBookId) || state.worldbook;
+  let entries: WorldBookEntry[] = [];
+
+  if (boundBookId && state.worldbookEntries.has(boundBookId)) {
+    entries = state.worldbookEntries.get(boundBookId)!;
+  } else {
+    // 未绑定：合并所有书的条目
+    for (const bookEntries of state.worldbookEntries.values()) {
+      entries.push(...bookEntries);
+    }
   }
-  return state.worldbook;
+
+  if (entries.length === 0) return state.worldbook;
+
+  // 按关键词过滤（模拟 STStyleWorldBook.getActiveEntries 逻辑）
+  const active: WorldBookEntry[] = [];
+  for (const entry of entries) {
+    if (entry.disable) continue;
+    if (entry.constant) { active.push(entry); continue; }
+
+    const primaryHit = entry.keys.some(key =>
+      contextTokens.some(t => t.toLowerCase().includes(key.toLowerCase()))
+    );
+    if (!primaryHit) continue;
+
+    // secondaryKeys: AND_ANY 模式下任一命中即可
+    if (entry.selective !== false && entry.secondaryKeys && entry.secondaryKeys.length > 0) {
+      const logic = entry.selectiveLogic || 'AND_ANY';
+      const secondaryHit = (sk: string) =>
+        contextTokens.some(t => t.toLowerCase().includes(sk.toLowerCase()));
+
+      if (logic === 'AND_ALL' && !entry.secondaryKeys.every(sk => secondaryHit(sk))) continue;
+      if (logic === 'NOT_ALL' && entry.secondaryKeys.every(sk => secondaryHit(sk))) continue;
+      if (logic === 'NOT_ANY' && entry.secondaryKeys.some(sk => secondaryHit(sk))) continue;
+    }
+
+    active.push(entry);
+  }
+
+  active.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+
+  return active.map(e => `${e.keys?.[0] || e.id}: ${e.content}`).join('\n') || state.worldbook;
 }
 
 // ======================== 处理函数（产生 SSE 事件，通过 emit 回调交出） ========================
@@ -117,7 +158,7 @@ async function processAgentNode(
 
   const context: ExpertContext = {
     vision: state.vision,
-    worldbook: resolveWorldbook(nodeId, state),
+    worldbook: resolveWorldbook(nodeId, (containerContext || '').split(/\s+/).filter(Boolean), state),
     rag: state.rag,
     containerContext,
     history: []
@@ -290,7 +331,7 @@ async function processGroupChatNode(
 
       const context: ExpertContext = {
         vision: state.vision,
-        worldbook: resolveWorldbook(nodeId, state),
+        worldbook: resolveWorldbook(nodeId, (containerCtx || '').split(/\s+/).filter(Boolean), state),
         rag: state.rag,
         containerContext: [
           containerCtx,
