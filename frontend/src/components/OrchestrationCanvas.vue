@@ -96,7 +96,6 @@
           <button class="toolbar-btn" @click="addContainer" title="群聊（多专家同时讨论）">📦</button>
           <button class="toolbar-btn" @click="openWorldBookPage" title="世界书管理">📖</button>
           <button class="toolbar-btn" @click="addPlaceholder('rag')" title="RAG节点">🔍</button>
-          <button class="toolbar-btn" @click="addPlaceholder('splitter')" title="章节拆分师">✂️</button>
           <span class="toolbar-sep"></span>
           <button class="toolbar-btn" @click="addInputSource" title="输入源节点（队列.md文件）">📥</button>
           <button class="toolbar-btn" @click="addJudgment" title="判断节点（审核通过/打回）">⚖️</button>
@@ -1530,14 +1529,13 @@ watch(() => props.pipelineOutput, (output) => {
 
 function addPlaceholder(type) {
   const configs = {
-    rag: { label: 'RAG检索', icon: '🔍', expertId: '__rag__', desc: '历史/技法检索' },
-    splitter: { label: '章节拆分师', icon: '✂️', expertId: 'chapter_splitter_v1', desc: '卷纲→章节' }
+    rag: { label: 'RAG检索', icon: '🔍', expertId: '__rag__', desc: '历史/技法检索' }
   }
   const cfg = configs[type]; if (!cfg) return
   const id = `node_${++nodeCounter}`
   nodes.value.push({
     id, type: 'expert', position: { x: 100 + nodeCounter * 80, y: 300 + nodeCounter * 30 },
-    data: { label: cfg.label, role: 'main', expertId: cfg.expertId, customPrompt: '', isPlaceholder: type !== 'splitter', triggers: {} },
+    data: { label: cfg.label, role: 'main', expertId: cfg.expertId, customPrompt: '', isPlaceholder: true, triggers: {} },
     style: { zIndex: 5 }
   })
 }
