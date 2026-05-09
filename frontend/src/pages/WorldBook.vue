@@ -379,6 +379,13 @@ const doDeleteBook = async () => {
   } catch (e) { alert('删除失败：' + (e.response?.data?.error || e.message)) }
 }
 
+// 通知画布刷新世界书节点条目数
+function notifyCanvas() {
+  if (window.opener) {
+    window.opener.postMessage({ type: 'worldbook-updated', bookId: currentBookId.value }, '*')
+  }
+}
+
 // ── 导入/导出 ──
 
 const triggerImport = () => { importInput.value?.click() }
@@ -404,6 +411,7 @@ async function importWorldBookData(data, sourceName) {
   await fetchBooks()
   currentBookId.value = res.data.book.bookId
   fetchEntries()
+  notifyCanvas()
 }
 
 const downloadBook = async () => {
@@ -508,6 +516,7 @@ const saveEntry = async () => {
     }
     cancelEdit()
     fetchEntries()
+    notifyCanvas()
   } catch (e) { alert('保存失败：' + (e.response?.data?.error || e.message)) }
 }
 
@@ -527,6 +536,7 @@ const doDeleteEntry = async () => {
     deleteEntryConfirm.value = false
     cancelEdit()
     fetchEntries()
+    notifyCanvas()
   } catch (e) { alert('删除失败：' + (e.response?.data?.error || e.message)) }
 }
 

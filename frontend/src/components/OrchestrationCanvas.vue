@@ -788,15 +788,25 @@ function getAllExperts() {
   return { ...layerExperts.value, ...customExperts.value }
 }
 
+// 监听世界书管理页的更新通知
+function onWorldBookMessage(e) {
+  if (e.data?.type === 'worldbook-updated') {
+    const node = nodes.value.find(n => n.type === 'worldbook' && n.data.bookId === e.data.bookId)
+    if (node) refreshWorldBookNode(node)
+  }
+}
+
 onMounted(() => {
   fetchCustomExperts()
   document.addEventListener('click', hideExpertContext)
   document.addEventListener('click', hideNodeCtx)
+  window.addEventListener('message', onWorldBookMessage)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', hideExpertContext)
   document.removeEventListener('click', hideNodeCtx)
+  window.removeEventListener('message', onWorldBookMessage)
 })
 
 async function fetchCustomExperts() {
@@ -1200,6 +1210,15 @@ function openWorldBookPage(node) {
   if (!node || node.type !== 'worldbook') return
   const url = `/worldbook?projectId=${encodeURIComponent(props.projectId || '')}&bookId=${encodeURIComponent(node.data.bookId || '')}`
   window.open(url, '_blank')
+}
+
+async function refreshWorldBookNode(node) {
+  if (!node || node.type !== 'worldbook' || !props.projectId) return
+  try {
+    const res = await axios.get(`/api/projects/${props.projectId}/worldbooks/${node.data.bookId}/entries`)
+    node.data.entryCount = res.data.entries?.length || 0
+    node.data.bookName = res.data.book?.name || node.data.bookName
+  } catch { /* ignore */ }
 }
 
 function setTrigger(field, value) {
@@ -1668,7 +1687,8 @@ function onNodeClick({ node }) {
   } else if (node.type === 'output') {
     // 输出节点单击时只选中，显示属性面板
   } else if (node.type === 'worldbook') {
-    // 世界书节点单击时选中，显示配置
+    // 选中时刷新条目数
+    refreshWorldBookNode(node)
   } else if (node.type === 'judgment') {
     // 判断节点单击时选中，显示配置
   }
