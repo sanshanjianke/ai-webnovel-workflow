@@ -297,14 +297,12 @@ export function registerMeetingRoutes(app: Express): void {
             for (const file of fs.readdirSync(worldbooksDir)) {
               if (!file.endsWith('.json') || file.endsWith('_commits.json')) continue;
               const bookId = file.replace('.json', '');
-              const bookPath = `${worldbooksDir}/${file}`;
               try {
-                const wb = JSON.parse(fs.readFileSync(bookPath, 'utf-8'));
+                const wb = JSON.parse(fs.readFileSync(`${worldbooksDir}/${file}`, 'utf-8'));
                 const entries = wb.entries || {};
-                const text = Object.values(entries)
+                worldbookMap.set(bookId, Object.values(entries)
                   .map((e: any) => `${e.keys?.[0] || ''}: ${e.content || ''}`)
-                  .join('\n');
-                worldbookMap.set(bookId, text);
+                  .join('\n'));
               } catch {}
             }
           }

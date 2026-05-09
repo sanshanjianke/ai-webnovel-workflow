@@ -95,12 +95,10 @@ async function dispatchToDownstream(
 
 /** 为指定节点解析世界书文本 */
 function resolveWorldbook(nodeId: string, state: WorkerSharedState): string {
-  // 检查该节点是否有绑定的 bookId
   const boundBookId = state.perNodeWorldBook.get(nodeId);
   if (boundBookId && state.worldbookMap.has(boundBookId)) {
     return state.worldbookMap.get(boundBookId) || state.worldbook;
   }
-  // 向后兼容：返回全部书的合并文本
   return state.worldbook;
 }
 
