@@ -217,6 +217,8 @@ export function registerMeetingRoutes(app: Express): void {
       worldbook_bindings: worldbookBindings as Record<string, string>
     };
 
+    console.log('[MEETING] worldbook_bindings in config:', JSON.stringify(config.worldbook_bindings));
+
     // 设置 SSE
     const writer = new SSEWriter(res);
     const meetingId = `${req.params.projectId}_${Date.now()}`;
