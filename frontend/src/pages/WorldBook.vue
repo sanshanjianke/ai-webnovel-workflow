@@ -128,8 +128,8 @@
               <input v-model.number="form.probability" type="number" min="0" max="100">
             </div>
             <div class="form-group">
-              <label>搜索深度</label>
-              <input v-model.number="form.depth" type="number" min="0" max="20">
+              <label>搜索深度 <span class="unimplemented">(尚未实现)</span></label>
+              <input v-model.number="form.depth" type="number" min="0" max="20" disabled>
             </div>
           </div>
 
@@ -162,19 +162,19 @@
           </div>
 
           <details class="advanced-section">
-            <summary>高级设置</summary>
+            <summary>高级设置 <span class="unimplemented">(标注"尚未实现"的功能暂时不可用)</span></summary>
             <div class="form-row">
               <div class="form-group">
-                <label>Sticky（激活后保持 N 条消息）</label>
-                <input v-model.number="form.sticky" type="number" min="0" placeholder="0=不保持">
+                <label>Sticky（激活后保持 N 条消息）<span class="unimplemented">尚未实现</span></label>
+                <input v-model.number="form.sticky" type="number" min="0" placeholder="0=不保持" disabled>
               </div>
               <div class="form-group">
-                <label>Cooldown（停用后冷却 N 条消息）</label>
-                <input v-model.number="form.cooldown" type="number" min="0" placeholder="0=不冷却">
+                <label>Cooldown（停用后冷却 N 条消息）<span class="unimplemented">尚未实现</span></label>
+                <input v-model.number="form.cooldown" type="number" min="0" placeholder="0=不冷却" disabled>
               </div>
               <div class="form-group">
-                <label>Delay（延迟 N 条消息后激活）</label>
-                <input v-model.number="form.delay" type="number" min="0" placeholder="0=无延迟">
+                <label>Delay（延迟 N 条消息后激活）<span class="unimplemented">尚未实现</span></label>
+                <input v-model.number="form.delay" type="number" min="0" placeholder="0=无延迟" disabled>
               </div>
             </div>
             <div class="form-row">
@@ -193,15 +193,15 @@
                 </select>
               </div>
               <div class="form-group">
-                <label>不可递归激活</label>
-                <select v-model="form.excludeRecursion">
+                <label>不可递归激活 <span class="unimplemented">尚未实现</span></label>
+                <select v-model="form.excludeRecursion" disabled>
                   <option :value="false">否</option>
                   <option :value="true">是</option>
                 </select>
               </div>
               <div class="form-group">
-                <label>无视 token 预算</label>
-                <select v-model="form.ignoreBudget">
+                <label>无视 token 预算 <span class="unimplemented">尚未实现</span></label>
+                <select v-model="form.ignoreBudget" disabled>
                   <option :value="false">否</option>
                   <option :value="true">是</option>
                 </select>
@@ -716,6 +716,7 @@ watch(initialBookId, (id) => {
 }
 
 .hint { color: #999; text-align: center; padding: 2rem; }
+.unimplemented { font-size: 0.7rem; color: #bbb; font-weight: normal; font-style: italic; }
 
 .commits-list { margin-top: 1rem; max-height: 200px; overflow-y: auto; }
 .commit-item {
