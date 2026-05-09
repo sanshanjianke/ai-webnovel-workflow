@@ -1419,7 +1419,6 @@ function runMeeting() {
     }
   }
 
-  console.log('[WorldBook] Emitting meeting config, worldbook_bindings:', expertWorldBookBindings)
   emit('run', {
     meeting_name: meetingName.value,
     pipeline: true,

@@ -253,11 +253,6 @@ export class ObjectPipelineEngine {
       rag: ragContext,
       outputSeq: { value: resumeFrom?.outputSeq || 0 }
     };
-    console.log('[ENGINE] sharedState perNodeWorldBook size:', sharedState.perNodeWorldBook.size, 'worldbookEntries size:', sharedState.worldbookEntries.size);
-    for (const [k, v] of sharedState.perNodeWorldBook) {
-      console.log('[ENGINE] perNodeWorldBook:', k, '→', v);
-    }
-
     this.activeSharedState = sharedState;
 
     // 为每个节点创建队列
