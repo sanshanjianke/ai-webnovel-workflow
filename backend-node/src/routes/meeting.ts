@@ -10,7 +10,8 @@ import { exportPipelineToZip } from '../services/zip-exporter';
 import { loadCheckpoint, deleteCheckpoint, cleanIncompleteRound, restoreObjects } from '../services/recovery-manager';
 import {
   MeetingConfig, ExpertConfig, ContainerConfig, EdgeConfig,
-  ExpertRole, Granularity, UserFeedback, ExpertDefinition, AgentStopConfig
+  ExpertRole, Granularity, UserFeedback, ExpertDefinition, AgentStopConfig,
+  WorldBookSummaryConfig
 } from '../protocols';
 import { SSEWriter } from '../utils/sse';
 import { listExperts } from '../experts';
@@ -172,7 +173,8 @@ export function registerMeetingRoutes(app: Express): void {
       queueFiles = [],
       queue_files: queueFilesAlt = [],
       agent_configs: agentConfigs = {},
-      worldbook_bindings: worldbookBindings = {}
+      worldbook_bindings: worldbookBindings = {},
+      worldbook_summary_configs: worldbookSummaryConfigs = {}
     } = req.body;
 
     // 支持两种字段名
@@ -281,6 +283,12 @@ export function registerMeetingRoutes(app: Express): void {
           if (cfg.readCategories) {
             engine.setReadConfig(nodeId, cfg.readCategories as ('input' | 'report' | 'chat_log')[]);
           }
+        }
+
+        // Apply worldbook summary configs
+        const wsc = worldbookSummaryConfigs as Record<string, WorldBookSummaryConfig>;
+        for (const [nodeId, cfg] of Object.entries(wsc)) {
+          engine.setWorldBookSummaryConfig(nodeId, cfg);
         }
 
         // Create pipeline objects from queue files
@@ -500,7 +508,7 @@ export function registerMeetingRoutes(app: Express): void {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    const { sessionId, agent_configs: agentConfigs = {} } = req.body;
+    const { sessionId, agent_configs: agentConfigs = {}, worldbook_summary_configs: worldbookSummaryConfigs = {} } = req.body;
     if (!sessionId) {
       return res.status(400).json({ error: 'sessionId is required' });
     }
@@ -542,6 +550,11 @@ export function registerMeetingRoutes(app: Express): void {
       if (cfg.readCategories) {
         engine.setReadConfig(nodeId, cfg.readCategories as ('input' | 'report' | 'chat_log')[]);
       }
+    }
+
+    const wsc = worldbookSummaryConfigs as Record<string, WorldBookSummaryConfig>;
+    for (const [nodeId, cfg] of Object.entries(wsc)) {
+      engine.setWorldBookSummaryConfig(nodeId, cfg);
     }
 
     // Register for feedback

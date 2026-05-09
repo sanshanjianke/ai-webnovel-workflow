@@ -3,14 +3,16 @@
 // 引擎只管：建 Worker、收集事件、yield 给 SSE、stop/pause/checkpoint。
 import {
   MeetingConfig, ExpertRole, Granularity, ContainerConfig,
-  AgentStopConfig, PipelineObject, OutputPort
+  AgentStopConfig, PipelineObject, OutputPort, WorldBookSummaryConfig,
+  WorldBookSummaryTask
 } from '../protocols';
 import { AsyncQueue } from '../utils/queue';
 import { CheckpointState, saveCheckpoint, deleteCheckpoint } from './recovery-manager';
 import {
   WorkerSharedState, NodeWorkerConfig,
   DEFAULT_STOP_CONFIG, DEFAULT_READ_CATEGORIES,
-  inputSourceWorker, expertWorker, groupChatWorker, outputWorker, judgmentWorker
+  inputSourceWorker, expertWorker, groupChatWorker, outputWorker, judgmentWorker,
+  worldbookObserverWorker
 } from './pipeline-workers';
 
 // ======================== 事件类型 ========================
@@ -44,6 +46,7 @@ export class ObjectPipelineEngine {
   private nodes: Map<string, InternalNode> = new Map();
   private agentConfigs: Map<string, AgentStopConfig> = new Map();
   private readConfigs: Map<string, ('input' | 'report' | 'chat_log')[]> = new Map();
+  private worldbookSummaryConfigs: Map<string, WorldBookSummaryConfig> = new Map();
   private state: 'idle' | 'running' | 'completed' | 'stopped' = 'idle';
   private stopRequested: boolean = false;
   private pendingFeedback: Map<string, string[]> = new Map();
@@ -74,6 +77,10 @@ export class ObjectPipelineEngine {
 
   setReadConfig(nodeId: string, categories: ('input' | 'report' | 'chat_log')[]): void {
     this.readConfigs.set(nodeId, categories);
+  }
+
+  setWorldBookSummaryConfig(nodeId: string, config: WorldBookSummaryConfig): void {
+    this.worldbookSummaryConfigs.set(nodeId, config);
   }
 
   stop(): void {
@@ -286,8 +293,21 @@ export class ObjectPipelineEngine {
         isContainer: node.isContainer,
         children: node.children,
         childrenRoles: node.childrenRoles,
-        containerConfig: node.containerConfig
+        containerConfig: node.containerConfig,
+        worldbookSummaryConfig: this.worldbookSummaryConfigs.get(nodeId)
       });
+    }
+
+    // 项目路径（供 worldbookObserverWorker 使用）
+    (sharedState as any)._projectPath = this.checkpointDir ? this.checkpointDir.replace(/\/outputs$/, '') : '';
+
+    // 如果有任何节点启用了世界书总结，创建观察者任务队列
+    let hasWorldBookObserver = false;
+    for (const cfg of this.worldbookSummaryConfigs.values()) {
+      if (cfg.enableWorldBookSummary) { hasWorldBookObserver = true; break; }
+    }
+    if (hasWorldBookObserver) {
+      sharedState.worldbookTaskQueue = new AsyncQueue<WorldBookSummaryTask>();
     }
 
     // 事件队列 — emit 回调往里塞，引擎从这取并 yield 给 SSE
@@ -344,6 +364,15 @@ export class ObjectPipelineEngine {
           break;
       }
       workerPromises.push(promise);
+    }
+
+    // 启动世界书观察者 Worker（不参与 DAG 数据流）
+    if (hasWorldBookObserver && sharedState.worldbookTaskQueue) {
+      const dummyQueue = new AsyncQueue<PipelineObject>();
+      const dummyDownstream = new Map<string, AsyncQueue<PipelineObject>>();
+      workerPromises.push(
+        worldbookObserverWorker('__worldbook_observer__', dummyQueue, dummyDownstream, emit, sharedState)
+      );
     }
 
     // 消费事件，yield 给 SSE

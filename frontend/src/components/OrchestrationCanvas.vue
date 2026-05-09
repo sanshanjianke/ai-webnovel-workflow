@@ -95,7 +95,8 @@
           <span class="toolbar-sep"></span>
           <button class="toolbar-btn" @click="addContainer" title="群聊（多专家同时讨论）">📦</button>
           <button class="toolbar-btn" @click="openWorldBookPage" title="世界书管理">📖</button>
-          <button class="toolbar-btn" @click="addPlaceholder('rag')" title="RAG节点">🔍</button>
+          <button class="toolbar-btn" @click="addWorldBookIcon" title="世界书管理员（观察者）">👁📖</button>
+          <button class="toolbar-btn" @click="addRAGIcon" title="RAG节点（检索）">🔍</button>
           <span class="toolbar-sep"></span>
           <button class="toolbar-btn" @click="addInputSource" title="输入源节点（队列.md文件）">📥</button>
           <button class="toolbar-btn" @click="addJudgment" title="判断节点（审核通过/打回）">⚖️</button>
@@ -319,6 +320,43 @@
             聊天记录
           </label>
         </div>
+        <div class="config-section">
+          <label class="section-label">世界书总结（世界书管理员）</label>
+        </div>
+        <div class="config-field config-inline">
+          <label class="checkbox-label">
+            <input type="checkbox" v-model="wbSummaryEnabled" @change="onWBSummaryChange" />
+            启用世界书总结
+          </label>
+        </div>
+        <template v-if="wbSummaryEnabled">
+          <div class="config-field">
+            <label>目标书</label>
+            <select v-model="wbSummaryTargetBook" @change="onWBSummaryChange">
+              <option value="default">默认世界书</option>
+              <option v-for="wb in worldBookList" :key="wb.bookId" :value="wb.bookId">{{ wb.name }} ({{ wb.entryCount }} 条)</option>
+            </select>
+          </div>
+          <div class="config-field">
+            <label>触发粒度</label>
+            <select v-model="wbSummaryTriggerGranularity" @change="onWBSummaryChange">
+              <option value="per_round">每轮完成</option>
+              <option value="per_node">节点完成</option>
+            </select>
+          </div>
+          <div class="config-field">
+            <label>总结深度 ({{ wbSummaryDepth }})</label>
+            <input v-model.number="wbSummaryDepth" type="range" min="1" max="5" @change="onWBSummaryChange" />
+          </div>
+          <div class="config-field">
+            <label>操作模式</label>
+            <select v-model="wbSummaryMode" @change="onWBSummaryChange">
+              <option value="auto">自动（直接写入）</option>
+              <option value="semi_auto">半自动（需确认）</option>
+              <option value="manual">手动（仅分析）</option>
+            </select>
+          </div>
+        </template>
         <div class="config-actions">
           <button class="btn btn-danger btn-sm" @click="removeNode">删除节点</button>
         </div>
@@ -525,6 +563,8 @@ import GroupNode from './GroupNode.vue'
 import InputSourceNode from './InputSourceNode.vue'
 import OutputNode from './OutputNode.vue'
 import JudgmentNode from './JudgmentNode.vue'
+import WorldBookIconNode from './WorldBookIconNode.vue'
+import RAGIconNode from './RAGIconNode.vue'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 
@@ -537,7 +577,7 @@ const props = defineProps({
   layer: { type: String, default: 'l2' }
 })
 
-const nodeTypes = { expert: markRaw(ExpertNode), container: markRaw(GroupNode), inputSource: markRaw(InputSourceNode), output: markRaw(OutputNode), judgment: markRaw(JudgmentNode) }
+const nodeTypes = { expert: markRaw(ExpertNode), container: markRaw(GroupNode), inputSource: markRaw(InputSourceNode), output: markRaw(OutputNode), judgment: markRaw(JudgmentNode), worldbookIcon: markRaw(WorldBookIconNode), ragIcon: markRaw(RAGIconNode) }
 
 const nodes = ref([])
 const edges = ref([])
@@ -562,6 +602,13 @@ const agentBlockEveryNRounds = ref(0)
 const agentReadInput = ref(true)
 const agentReadReport = ref(true)
 const agentReadChatLog = ref(false)
+
+// 世界书总结配置
+const wbSummaryEnabled = ref(false)
+const wbSummaryTargetBook = ref('default')
+const wbSummaryTriggerGranularity = ref('per_round')
+const wbSummaryDepth = ref(3)
+const wbSummaryMode = ref('semi_auto')
 
 const customExperts = ref({})
 
@@ -1154,6 +1201,27 @@ function onAgentConfigChange() {
   selectedNode.value.data.agentReadChatLog = agentReadChatLog.value
 }
 
+function loadWBSummaryConfig() {
+  if (!selectedNode.value || selectedNode.value.type !== 'expert') return
+  const cfg = selectedNode.value.data.wbSummaryConfig
+  wbSummaryEnabled.value = cfg?.enableWorldBookSummary || false
+  wbSummaryTargetBook.value = cfg?.targetBookId || 'default'
+  wbSummaryTriggerGranularity.value = cfg?.triggerGranularity || 'per_round'
+  wbSummaryDepth.value = cfg?.summaryDepth || 3
+  wbSummaryMode.value = cfg?.operationMode || 'semi_auto'
+}
+
+function onWBSummaryChange() {
+  if (!selectedNode.value || selectedNode.value.type !== 'expert') return
+  selectedNode.value.data.wbSummaryConfig = {
+    enableWorldBookSummary: wbSummaryEnabled.value,
+    targetBookId: wbSummaryTargetBook.value,
+    triggerGranularity: wbSummaryTriggerGranularity.value,
+    summaryDepth: wbSummaryDepth.value,
+    operationMode: wbSummaryMode.value
+  }
+}
+
 const nodeTriggers = computed(() => {
   if (!selectedNode.value || !selectedNode.value.data) return { worldbook: 'off', rag: 'off' }
   const t = selectedNode.value.data.triggers || {}
@@ -1358,6 +1426,22 @@ function buildSingleAgentConfig(data) {
   }
 }
 
+function buildWorldBookSummaryConfigs() {
+  const configs = {}
+  for (const node of nodes.value.filter(n => n.type === 'expert')) {
+    if (node.data.wbSummaryConfig?.enableWorldBookSummary) {
+      configs[node.id] = node.data.wbSummaryConfig
+    }
+  }
+  // Container nodes carry their own config
+  for (const node of nodes.value.filter(n => n.type === 'container')) {
+    if (node.data.wbSummaryConfig?.enableWorldBookSummary) {
+      configs[node.id] = node.data.wbSummaryConfig
+    }
+  }
+  return configs
+}
+
 function runMeeting() {
   // 检查是否有输入源
   const inputFiles = inputSourceFiles()
@@ -1427,6 +1511,7 @@ function runMeeting() {
     worldbook_bindings: expertWorldBookBindings,
     queue_files: inputSourceFiles(),
     agent_configs: buildAgentConfigs(),
+    worldbook_summary_configs: buildWorldBookSummaryConfigs(),
     edges: edges.value.filter(e => {
       const isInterContainer = nodes.value.some(n =>
         n.type === 'container' && (e.source === n.id || e.target === n.id)
@@ -1605,6 +1690,24 @@ function addJudgment() {
   })
 }
 
+function addWorldBookIcon() {
+  const id = `worldbook_${++nodeCounter}`
+  nodes.value.push({
+    id, type: 'worldbookIcon', position: { x: 80, y: 100 },
+    data: { label: '世界书管理员', targetBookId: 'default', targetBookName: '默认世界书' },
+    style: { zIndex: 3 }
+  })
+}
+
+function addRAGIcon() {
+  const id = `rag_${++nodeCounter}`
+  nodes.value.push({
+    id, type: 'ragIcon', position: { x: 80, y: 180 },
+    data: { label: 'RAG 检索', targetInstance: '默认实例' },
+    style: { zIndex: 3 }
+  })
+}
+
 function onNodeClick({ node }) {
   selectedNode.value = node
   if (node.type === 'expert') {
@@ -1616,6 +1719,7 @@ function onNodeClick({ node }) {
     agentReadInput.value = node.data.agentReadInput !== undefined ? node.data.agentReadInput : true
     agentReadReport.value = node.data.agentReadReport !== undefined ? node.data.agentReadReport : true
     agentReadChatLog.value = node.data.agentReadChatLog || false
+    loadWBSummaryConfig()
   } else if (node.type === 'container') {
     loadContainerConfig(node)
   } else if (node.type === 'inputSource') {
@@ -1633,6 +1737,15 @@ function onPaneClick() {
 }
 
 function onNodeDoubleClick({ node }) {
+  if (node.type === 'worldbookIcon') {
+    const bookId = node.data.targetBookId || 'default'
+    window.open(`/worldbook-manager?projectId=${encodeURIComponent(props.projectId)}&bookId=${encodeURIComponent(bookId)}`, '_blank')
+    return
+  }
+  if (node.type === 'ragIcon') {
+    window.open(`/rag?projectId=${encodeURIComponent(props.projectId)}`, '_blank')
+    return
+  }
   openNodeChatTab(node)
 }
 

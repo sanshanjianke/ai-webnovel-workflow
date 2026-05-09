@@ -5,7 +5,8 @@
 
 import {
   MeetingConfig, ExpertRole, Granularity, ContainerConfig,
-  AgentStopConfig, PipelineObject, ExpertContext, ExpertChatLog
+  AgentStopConfig, PipelineObject, ExpertContext, ExpertChatLog,
+  WorldBookSummaryConfig, WorldBookSummaryTask
 } from '../protocols';
 import { createExpert } from '../experts';
 import type { BaseExpert } from '../experts/base';
@@ -26,6 +27,7 @@ export interface NodeWorkerConfig {
   children?: string[];
   childrenRoles?: Map<string, ExpertRole>;
   containerConfig?: ContainerConfig;
+  worldbookSummaryConfig?: WorldBookSummaryConfig;
 }
 
 import { WorldBookEntry } from '../protocols';
@@ -42,6 +44,7 @@ export interface WorkerSharedState {
   perNodeWorldBook: Map<string, string>;          // nodeId → bookId 绑定
   rag: string;
   outputSeq: { value: number };
+  worldbookTaskQueue?: AsyncQueue<WorldBookSummaryTask>;  // 世界书管理员任务队列
 }
 
 export const DEFAULT_STOP_CONFIG: AgentStopConfig = {
@@ -259,6 +262,9 @@ async function processAgentNode(
           type: 'object_progress',
           data: { objectId: obj.id, objectName: obj.name, nodeId, totalFiles: currentFiles.length, files: currentFiles }
         });
+
+        // 世界书总结触发（per_round）
+        tryEnqueueWorldBookTask(nodeId, obj, state, expert.expertId, 'agent_round_complete', roundReport);
       }
 
       if (agentEvent.type === 'agent_complete') {
@@ -266,6 +272,12 @@ async function processAgentNode(
         const chatLog = agentEvent.data.chatLog as ExpertChatLog;
         state.outputSeq.value++;
         addExpertOutput(obj, expert.expertId, expert.expertType, report, chatLog, state.outputSeq.value);
+
+        // 世界书总结触发（per_node）
+        const fullContent = chatLog?.rounds?.map(r =>
+          r.messages?.filter(m => m.role === 'assistant').map(m => m.content).join('\n') || ''
+        ).join('\n') || report;
+        tryEnqueueWorldBookTask(nodeId, obj, state, expert.expertId, 'agent_complete', fullContent);
       }
     }
   } catch (err) {
@@ -464,6 +476,12 @@ async function processGroupChatNode(
       data: { nodeId, round: roundNum, totalSpeeches, objectId: obj.id }
     });
 
+    // 世界书总结触发（per_round）
+    if (roundSpeeches.length > 0) {
+      const roundContent = roundSpeeches.map(s => `[${s.expertType}] ${s.content}`).join('\n\n');
+      tryEnqueueWorldBookTask(nodeId, obj, state, nodeId, 'group_chat_round_complete', roundContent);
+    }
+
     roundNum++;
   }
 
@@ -501,6 +519,9 @@ async function processGroupChatNode(
       objectName: obj.name
     }
   });
+
+  // 世界书总结触发（per_node）
+  tryEnqueueWorldBookTask(nodeId, obj, state, nodeId, 'group_chat_complete', combinedReport);
 
   // 群聊 Worker 处理完对象，发最新文件列表
   emit({
@@ -757,5 +778,100 @@ ${reportText || '（无产出）'}
     obj.completedAt = new Date().toISOString();
 
     await dispatchToDownstream(nodeId, obj, downstreamQueues, edgePortMap);
+  }
+}
+
+// ======================== 世界书总结触发器 ========================
+
+function tryEnqueueWorldBookTask(
+  nodeId: string,
+  obj: PipelineObject,
+  state: WorkerSharedState,
+  producerId: string,
+  triggeredBy: string,
+  chatContent: string
+): void {
+  if (!state.worldbookTaskQueue) return;
+
+  const nodeConfig = state.nodeConfigs.get(nodeId);
+  if (!nodeConfig?.worldbookSummaryConfig?.enableWorldBookSummary) return;
+
+  const cfg = nodeConfig.worldbookSummaryConfig;
+  const shouldTrigger = cfg.triggerGranularity === 'per_round'
+    ? triggeredBy.endsWith('round_complete')
+    : triggeredBy.endsWith('complete') && !triggeredBy.includes('round');
+
+  if (!shouldTrigger) return;
+
+  const task: WorldBookSummaryTask = {
+    taskId: `wbt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    nodeId,
+    nodeType: nodeConfig.isContainer ? 'group_chat' : 'expert',
+    objectId: obj.id,
+    objectName: obj.name,
+    targetBookId: cfg.targetBookId || 'default',
+    summaryConfig: cfg,
+    chatContent,
+    existingEntries: state.worldbookEntries.get(cfg.targetBookId || 'default') || [],
+    triggeredBy,
+    timestamp: new Date().toISOString()
+  };
+
+  state.worldbookTaskQueue.enqueue(task).catch(() => {});
+}
+
+// ======================== 世界书观察者 Worker ========================
+
+/**
+ * 世界书观察者 Worker — 不参与 PipelineObject 数据流。
+ * 监听专用 worldbookTaskQueue，对每个任务调用 WorldBookManagerService 分析聊天内容并更新世界书条目。
+ */
+export async function worldbookObserverWorker(
+  _nodeId: string,
+  _inputQueue: AsyncQueue<PipelineObject>,
+  _downstreamQueues: Map<string, AsyncQueue<PipelineObject>>,
+  emit: (event: PipelineEventV2) => void,
+  state: WorkerSharedState
+): Promise<void> {
+  const taskQueue = state.worldbookTaskQueue;
+  if (!taskQueue) return;
+
+  // lazy import to avoid circular dependency
+  const { WorldBookManagerService } = await import('./worldbook-manager-service');
+
+  // 需要 projectPath 来构造 WorldBookManagerService
+  // 从 globalConfig 或 state 中获取 — 暂时硬编码从 data/projects 推导
+  const projectPath = (state as any)._projectPath as string || '';
+
+  const wbEventEmitter = (event: { type: string; data: Record<string, unknown> }) => {
+    emit(event as PipelineEventV2);
+  };
+
+  const manager = new WorldBookManagerService(projectPath, wbEventEmitter);
+
+  while (!state.stopRequested) {
+    await new Promise<void>(resolve => {
+      const check = () => {
+        if (state.stopRequested) { resolve(); return; }
+        resolve();
+      };
+      setTimeout(check, 100);
+    });
+    if (state.stopRequested) break;
+
+    const task = taskQueue.dequeueSync();
+    if (!task) {
+      await sleep(1000);
+      continue;
+    }
+
+    try {
+      await manager.processTask(task);
+    } catch (err: any) {
+      emit({
+        type: 'worldbook_task_complete',
+        data: { taskId: task.taskId, nodeId: task.nodeId, error: `Manager error: ${err.message}`, totalActions: 0, appliedCount: 0 }
+      });
+    }
   }
 }

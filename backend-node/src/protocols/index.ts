@@ -249,6 +249,51 @@ export interface CommitRecord {
   entryCount: number;
 }
 
+// ============ 世界书管理员 ============
+
+export interface WorldBookSummaryConfig {
+  enableWorldBookSummary: boolean;
+  targetBookId: string;
+  triggerGranularity: 'per_round' | 'per_node';
+  summaryDepth: number;
+  operationMode: 'auto' | 'semi_auto' | 'manual';
+}
+
+export interface WorldBookSummaryTask {
+  taskId: string;
+  nodeId: string;
+  nodeType: 'expert' | 'group_chat';
+  objectId: string;
+  objectName: string;
+  targetBookId: string;
+  summaryConfig: WorldBookSummaryConfig;
+  chatContent: string;
+  existingEntries: WorldBookEntry[];
+  triggeredBy: string;
+  timestamp: string;
+}
+
+export interface WorldBookAction {
+  actionId: string;
+  action: 'create' | 'update' | 'merge' | 'skip';
+  keys: string[];
+  content: string;
+  reason: string;
+  targetEntryId?: string;
+  mergeFromIds?: string[];
+  priority?: number;
+  group?: string;
+  status: 'pending' | 'applied' | 'rejected' | 'modified';
+  modifiedContent?: string;
+  modifiedKeys?: string;
+}
+
+export interface WorldBookAnalysisResult {
+  actions: WorldBookAction[];
+  summary: string;
+  confidence: number;
+}
+
 // ============ RAG ============
 
 export interface RetrievedDoc {
@@ -268,6 +313,41 @@ export interface RAGRetriever {
   retrieve(query: string, k?: number): Promise<RetrievedDoc[]>;
   index(documents: RAGDocument[]): Promise<void>;
   count(): Promise<number>;
+}
+
+// ============ RAG 实例管理 ============
+
+export type RAGRetrieverType = 'keyword' | 'hybrid' | 'vector';
+export type RAGInstanceType = 'history' | 'technique' | 'custom';
+
+export interface RAGInstanceConfig {
+  instanceId: string;
+  name: string;
+  type: RAGInstanceType;
+  retrieverType: RAGRetrieverType;
+  description?: string;
+  embeddingModel?: string;
+  slicingDimensions?: string[];
+  enhancementEnabled?: boolean;
+  autoIndex?: boolean;
+  maxResults?: number;
+  maxInjectionTokens?: number;
+  vectorWeight?: number;
+  keywordWeight?: number;
+  threshold?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RAGInstanceInfo {
+  instanceId: string;
+  name: string;
+  type: RAGInstanceType;
+  retrieverType: RAGRetrieverType;
+  documentCount: number;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // ============ 文档库 ============

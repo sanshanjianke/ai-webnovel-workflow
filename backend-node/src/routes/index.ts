@@ -8,6 +8,7 @@ import { registerRAGRoutes } from './rag';
 import { registerLibraryRoutes } from './library';
 import { registerSettingsRoutes } from './settings';
 import { registerTagRoutes } from './tags';
+import { registerWorldBookManagerRoutes } from './worldbook-manager';
 
 export function registerAllRoutes(app: Express): void {
   // 项目管理
@@ -30,6 +31,9 @@ export function registerAllRoutes(app: Express): void {
 
   // 标签库
   registerTagRoutes(app);
+
+  // 世界书管理员
+  registerWorldBookManagerRoutes(app);
 
   // 系统设置
   registerSettingsRoutes(app);
