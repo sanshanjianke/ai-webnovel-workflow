@@ -25,7 +25,7 @@
       <button class="btn btn-sm" @click="downloadBook" :disabled="entries.length === 0">⬇ 下载</button>
       <button class="btn btn-sm" @click="triggerImport">📥 导入</button>
       <button class="btn btn-sm" @click="saveToLibrary">📚 存到文档库</button>
-      <input ref="importInput" type="file" accept=".json" @change="handleImport" style="display:none" />
+      <input ref="importInput" type="file" accept=".json,.png" @change="handleImport" style="display:none" />
     </div>
 
     <div v-if="showNewBook" class="new-book-row">
@@ -390,13 +390,111 @@ function notifyCanvas() {
 
 const triggerImport = () => { importInput.value?.click() }
 
+// ── PNG 元数据提取（兼容 SillyTavern 角色卡/世界书 PNG）──
+
+function extractDataFromPng(data) {
+  if (!data || data[0] !== 0x89 || data[1] !== 0x50 || data[2] !== 0x4E || data[3] !== 0x47) return null
+  const td = new TextDecoder('ascii')
+
+  const uint8 = new Uint8Array(4), uint32 = new Uint32Array(uint8.buffer)
+  let idx = 8, chunks = []
+
+  while (idx < data.length) {
+    uint8[3] = data[idx++]; uint8[2] = data[idx++]; uint8[1] = data[idx++]; uint8[0] = data[idx++]
+    let length = uint32[0] + 4
+    let chunk = new Uint8Array(length)
+    chunk[0] = data[idx++]; chunk[1] = data[idx++]; chunk[2] = data[idx++]; chunk[3] = data[idx++]
+    let name = td.decode(chunk.slice(0, 4))
+    for (let i = 4; i < length; i++) chunk[i] = data[idx++]
+    idx += 4 // skip CRC
+    chunks.push({ name, data: new Uint8Array(chunk.buffer.slice(4)) })
+    if (name === 'IEND') break
+  }
+
+  // 解码 tEXt chunks
+  const results = []
+  for (const c of chunks) {
+    if (c.name !== 'tEXt') continue
+    let sep = c.data.indexOf(0)
+    if (sep <= 0) continue
+    const keyword = td.decode(c.data.slice(0, sep))
+    const text = td.decode(c.data.slice(sep + 1))
+    try {
+      // atob → binary string → UTF-8 bytes → JSON
+      const binary = atob(text)
+      const bytes = Uint8Array.from(binary, c => c.charCodeAt(0))
+      const decoded = new TextDecoder('utf-8').decode(bytes)
+      const parsed = JSON.parse(decoded)
+      results.push({ keyword, data: parsed })
+    } catch {}
+  }
+  return results.length > 0 ? results : null
+}
+
+function convertCharacterBookToEntries(characterBook) {
+  const entries = {}
+  if (!characterBook.entries) return entries
+  characterBook.entries.forEach((entry, index) => {
+    const id = entry.id !== undefined ? entry.id : index
+    entries[id] = {
+      id: String(id),
+      keys: entry.keys || [],
+      content: entry.content || '',
+      secondaryKeys: entry.secondary_keys || [],
+      constant: entry.constant || false,
+      selective: entry.selective !== undefined ? entry.selective : typeof entry.enabled !== 'undefined' ? entry.enabled : true,
+      selectiveLogic: (entry.extensions?.selectiveLogic) || 'AND_ANY',
+      priority: entry.insertion_order || 10,
+      position: entry.position || 'before_char',
+      disable: entry.enabled === false,
+      comment: entry.comment || '',
+      probability: entry.extensions?.probability ?? 100,
+      depth: entry.extensions?.depth ?? 4,
+      group: entry.extensions?.group || '',
+      groupWeight: entry.extensions?.group_weight ?? 100,
+      sticky: entry.extensions?.sticky ?? null,
+      cooldown: entry.extensions?.cooldown ?? null,
+      delay: entry.extensions?.delay ?? null,
+      caseSensitive: entry.extensions?.case_sensitive || false,
+      matchWholeWords: entry.extensions?.match_whole_words || false,
+      excludeRecursion: entry.extensions?.exclude_recursion ?? false,
+      preventRecursion: entry.extensions?.prevent_recursion ?? false,
+      delayUntilRecursion: entry.extensions?.delay_until_recursion ?? 0,
+      ignoreBudget: entry.extensions?.ignore_budget || false,
+      role: entry.extensions?.role || ''
+    }
+  })
+  return entries
+}
+
 const handleImport = async (event) => {
   const file = event.target.files?.[0]
   if (!file) return
   try {
-    const text = await file.text()
-    const data = JSON.parse(text)
-    await importWorldBookData(data, file.name)
+    if (file.name.endsWith('.png')) {
+      // PNG: 提取内嵌的角色卡 → 转换 worldbook
+      const buffer = new Uint8Array(await file.arrayBuffer())
+      const textChunks = extractDataFromPng(buffer)
+      if (!textChunks) { alert('PNG 文件中未找到内嵌数据'); return }
+
+      // 优先取 ccv3，其次 chara
+      const ccv3 = textChunks.find(t => t.keyword.toLowerCase() === 'ccv3')
+      const chara = textChunks.find(t => t.keyword.toLowerCase() === 'chara')
+      const cardData = (ccv3 || chara)?.data
+
+      if (!cardData?.data?.character_book) {
+        alert('PNG 角色卡中未包含世界书 (character_book)')
+        return
+      }
+
+      const bookName = cardData.data.character_book.name || cardData.data.name || file.name.replace(/\.png$/, '')
+      const entries = convertCharacterBookToEntries(cardData.data.character_book)
+      await importWorldBookData({ name: bookName, entries }, file.name)
+    } else {
+      const text = await file.text()
+      const data = JSON.parse(text)
+      await importWorldBookData(data, file.name)
+    }
   } catch (e) { alert('导入失败：' + (e.response?.data?.error || e.message)) }
   event.target.value = ''
 }
