@@ -94,7 +94,7 @@
           <span class="toolbar-label">工具</span>
           <span class="toolbar-sep"></span>
           <button class="toolbar-btn" @click="addContainer" title="群聊（多专家同时讨论）">📦</button>
-          <button class="toolbar-btn" @click="addWorldBookNode" title="世界书节点">📖</button>
+          <button class="toolbar-btn" @click="openWorldBookPage" title="世界书管理">📖</button>
           <button class="toolbar-btn" @click="addPlaceholder('rag')" title="RAG节点">🔍</button>
           <button class="toolbar-btn" @click="addPlaceholder('splitter')" title="章节拆分师">✂️</button>
           <span class="toolbar-sep"></span>
@@ -245,11 +245,11 @@
             @change="setWorldBookBinding($event.target.value)"
             class="trigger-select-wb">
             <option value="">不绑定（使用所有书）</option>
-            <option v-for="wb in worldBookNodes" :key="wb.id" :value="wb.data.bookId">
-              {{ wb.data.bookName || wb.data.label }}
+            <option v-for="wb in worldBookList" :key="wb.bookId" :value="wb.bookId">
+              {{ wb.name }} ({{ wb.entryCount }} 条)
             </option>
           </select>
-          <small v-if="worldBookNodes.length === 0" style="color:#999;">画布上无世界书节点，请先在工具栏点击 📖 添加</small>
+          <small v-if="worldBookList.length === 0" style="color:#999;">暂无世界书，请先点击工具栏 📖 创建</small>
         </div>
         <div class="config-field">
           <label>RAG 检索</label>
@@ -376,29 +376,6 @@
           </div>
         </div>
         <div class="config-actions">
-          <button class="btn btn-danger btn-sm" @click="removeNode">删除节点</button>
-        </div>
-      </div>
-
-      <!-- ── 右侧面板：世界书节点 ── -->
-      <div class="config-panel" v-else-if="selectedNode && selectedNode.type === 'worldbook'">
-        <div class="panel-header-row">
-          <h4>📖 世界书节点</h4>
-          <button class="btn-back" @click="selectedNode = null">← 返回</button>
-        </div>
-        <div class="config-field">
-          <label>书名</label>
-          <input :value="selectedNode.data.bookName" @change="e => { selectedNode.data.bookName = e.target.value; selectedNode.data.label = e.target.value }" />
-        </div>
-        <div class="config-field">
-          <label>Book ID</label>
-          <input :value="selectedNode.data.bookId" disabled />
-        </div>
-        <div class="config-field">
-          <label>条目数：{{ selectedNode.data.entryCount || 0 }}</label>
-        </div>
-        <div class="config-actions" style="display:flex;flex-direction:column;gap:6px;">
-          <button class="btn btn-primary btn-sm" @click="openWorldBookPage(selectedNode)">📖 管理世界书条目</button>
           <button class="btn btn-danger btn-sm" @click="removeNode">删除节点</button>
         </div>
       </div>
@@ -531,43 +508,6 @@
       </div>
     </div>
 
-    <!-- ── 世界书选择弹窗 ── -->
-    <div v-if="showWorldBookPicker" class="modal-overlay" @click.self="showWorldBookPicker = false">
-      <div class="modal-content card" style="width:400px;">
-        <h2 style="margin-bottom:1rem;">📖 添加世界书节点</h2>
-
-        <div style="display:flex; gap:8px; margin-bottom:1rem;">
-          <label class="picker-tab" :class="{ active: worldBookPickerMode === 'existing' }">
-            <input type="radio" v-model="worldBookPickerMode" value="existing" /> 绑定已有书
-          </label>
-          <label class="picker-tab" :class="{ active: worldBookPickerMode === 'new' }">
-            <input type="radio" v-model="worldBookPickerMode" value="new" /> 创建新书
-          </label>
-        </div>
-
-        <div v-if="worldBookPickerMode === 'existing'" class="form-group">
-          <label>选择世界书</label>
-          <select v-model="worldBookPickerSelected" class="full-width">
-            <option v-for="b in worldBookPickerList" :key="b.bookId" :value="b.bookId">
-              {{ b.name }} ({{ b.entryCount }} 条)
-            </option>
-          </select>
-          <small v-if="worldBookPickerList.length === 0" style="color:#999;">暂无已有世界书，请先创建</small>
-        </div>
-
-        <div v-else class="form-group">
-          <label>书名</label>
-          <input v-model="worldBookPickerNewName" placeholder="输入新世界书名称" @keyup.enter="confirmAddWorldBookNode" />
-        </div>
-
-        <div class="modal-actions">
-          <button class="btn btn-primary" @click="confirmAddWorldBookNode" :disabled="worldBookPickerMode === 'existing' && (!worldBookPickerSelected || worldBookPickerList.length === 0) || (worldBookPickerMode === 'new' && !worldBookPickerNewName.trim())">
-            确认添加
-          </button>
-          <button class="btn" @click="showWorldBookPicker = false">取消</button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -586,7 +526,6 @@ import GroupNode from './GroupNode.vue'
 import InputSourceNode from './InputSourceNode.vue'
 import OutputNode from './OutputNode.vue'
 import JudgmentNode from './JudgmentNode.vue'
-import WorldBookNode from './WorldBookNode.vue'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 
@@ -599,7 +538,7 @@ const props = defineProps({
   layer: { type: String, default: 'l2' }
 })
 
-const nodeTypes = { expert: markRaw(ExpertNode), container: markRaw(GroupNode), inputSource: markRaw(InputSourceNode), output: markRaw(OutputNode), judgment: markRaw(JudgmentNode), worldbook: markRaw(WorldBookNode) }
+const nodeTypes = { expert: markRaw(ExpertNode), container: markRaw(GroupNode), inputSource: markRaw(InputSourceNode), output: markRaw(OutputNode), judgment: markRaw(JudgmentNode) }
 
 const nodes = ref([])
 const edges = ref([])
@@ -826,25 +765,16 @@ function getAllExperts() {
   return { ...layerExperts.value, ...customExperts.value }
 }
 
-// 监听世界书管理页的更新通知
-function onWorldBookMessage(e) {
-  if (e.data?.type === 'worldbook-updated') {
-    const node = nodes.value.find(n => n.type === 'worldbook' && n.data.bookId === e.data.bookId)
-    if (node) refreshWorldBookNode(node)
-  }
-}
-
 onMounted(() => {
   fetchCustomExperts()
+  fetchWorldBookList()
   document.addEventListener('click', hideExpertContext)
   document.addEventListener('click', hideNodeCtx)
-  window.addEventListener('message', onWorldBookMessage)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', hideExpertContext)
   document.removeEventListener('click', hideNodeCtx)
-  window.removeEventListener('message', onWorldBookMessage)
 })
 
 async function fetchCustomExperts() {
@@ -1231,7 +1161,15 @@ const nodeTriggers = computed(() => {
   return { worldbook: t.worldbook || 'off', rag: t.rag || 'off' }
 })
 
-const worldBookNodes = computed(() => nodes.value.filter(n => n.type === 'worldbook'))
+const worldBookList = ref([])
+
+async function fetchWorldBookList() {
+  if (!props.projectId) return
+  try {
+    const res = await axios.get(`/api/projects/${props.projectId}/worldbooks`)
+    worldBookList.value = res.data.books || []
+  } catch { worldBookList.value = [] }
+}
 
 const expertWorldBookBinding = computed(() => {
   if (!selectedNode.value || !selectedNode.value.data) return ''
@@ -1244,19 +1182,9 @@ function setWorldBookBinding(bookId) {
   }
 }
 
-function openWorldBookPage(node) {
-  if (!node || node.type !== 'worldbook') return
-  const url = `/worldbook?projectId=${encodeURIComponent(props.projectId || '')}&bookId=${encodeURIComponent(node.data.bookId || '')}`
+function openWorldBookPage() {
+  const url = `/worldbook?projectId=${encodeURIComponent(props.projectId || '')}`
   window.open(url, '_blank')
-}
-
-async function refreshWorldBookNode(node) {
-  if (!node || node.type !== 'worldbook' || !props.projectId) return
-  try {
-    const res = await axios.get(`/api/projects/${props.projectId}/worldbooks/${node.data.bookId}/entries`)
-    node.data.entryCount = res.data.entries?.length || 0
-    node.data.bookName = res.data.book?.name || node.data.bookName
-  } catch { /* ignore */ }
 }
 
 function setTrigger(field, value) {
@@ -1330,7 +1258,7 @@ function loadContainerConfig(node) {
 // ── 发言顺序计算 ──
 
 const orderedNodes = computed(() => {
-  const allNodes = nodes.value.filter(n => n.type === 'expert' || n.type === 'container' || n.type === 'judgment' || n.type === 'worldbook')
+  const allNodes = nodes.value.filter(n => n.type === 'expert' || n.type === 'container' || n.type === 'judgment')
   if (allNodes.length === 0) return []
 
   if (edges.value.length === 0) return flattenNodes(allNodes)
@@ -1483,11 +1411,6 @@ function runMeeting() {
         .map(e => ({ source: e.source, target: e.target }))
     }))
 
-  // 收集世界书节点信息
-  const worldbookBooks = nodes.value
-    .filter(n => n.type === 'worldbook')
-    .map(n => ({ bookId: n.data.bookId, name: n.data.bookName || n.data.label }))
-
   // 收集每个专家的世界书绑定
   const expertWorldBookBindings = {}
   for (const node of nodes.value.filter(n => n.type === 'expert')) {
@@ -1502,7 +1425,6 @@ function runMeeting() {
     pipeline_version: 2,
     experts,
     containers,
-    worldbook_books: worldbookBooks,
     worldbook_bindings: expertWorldBookBindings,
     queue_files: inputSourceFiles(),
     agent_configs: buildAgentConfigs(),
@@ -1604,66 +1526,6 @@ watch(() => props.pipelineOutput, (output) => {
   console.log('[OrchestrationCanvas] Files set to output nodes:', files)
 }, { immediate: true, deep: true })
 
-// ── 世界书节点 ──
-
-const showWorldBookPicker = ref(false)
-const worldBookPickerList = ref([])
-const worldBookPickerMode = ref('existing')  // 'existing' | 'new'
-const worldBookPickerSelected = ref('')
-const worldBookPickerNewName = ref('')
-
-async function addWorldBookNode() {
-  // 拉取已有世界书列表
-  if (props.projectId) {
-    try {
-      const res = await axios.get(`/api/projects/${props.projectId}/worldbooks`)
-      worldBookPickerList.value = res.data.books || []
-    } catch { worldBookPickerList.value = [] }
-  }
-  worldBookPickerSelected.value = worldBookPickerList.value[0]?.bookId || ''
-  worldBookPickerNewName.value = ''
-  worldBookPickerMode.value = 'existing'
-  showWorldBookPicker.value = true
-}
-
-function confirmAddWorldBookNode() {
-  showWorldBookPicker.value = false
-
-  let bookId, bookName
-
-  if (worldBookPickerMode.value === 'existing' && worldBookPickerSelected.value) {
-    // 绑定已有书
-    const book = worldBookPickerList.value.find(b => b.bookId === worldBookPickerSelected.value)
-    bookId = book.bookId
-    bookName = book.name
-  } else if (worldBookPickerMode.value === 'new' && worldBookPickerNewName.value.trim()) {
-    // 创建新书
-    bookId = `wb_${Date.now()}_${++nodeCounter}`
-    bookName = worldBookPickerNewName.value.trim()
-    // 异步创建，节点先用临时 bookId
-    axios.post(`/api/projects/${props.projectId}/worldbooks`, { name: bookName }).then(res => {
-      const node = nodes.value.find(n => n.id === id)
-      if (node) {
-        node.data.bookId = res.data.book.bookId
-        node.data.bookName = res.data.book.name
-      }
-    }).catch(() => {})
-  } else {
-    return  // 未选择
-  }
-
-  const id = `worldbook_${++nodeCounter}`
-  nodes.value.push({
-    id, type: 'worldbook', position: { x: 100 + nodeCounter * 80, y: 300 + nodeCounter * 30 },
-    data: { label: bookName, bookId, bookName, entryCount: 0, selected: false },
-    style: { zIndex: 5 }
-  })
-  // 已有书：立即拉取条目数
-  if (worldBookPickerMode.value === 'existing') {
-    refreshWorldBookNode(nodes.value.find(n => n.id === id))
-  }
-}
-
 // ── 占位节点 ──
 
 function addPlaceholder(type) {
@@ -1762,9 +1624,6 @@ function onNodeClick({ node }) {
     showQueuePanel.value = true
   } else if (node.type === 'output') {
     // 输出节点单击时只选中，显示属性面板
-  } else if (node.type === 'worldbook') {
-    // 选中时刷新条目数
-    refreshWorldBookNode(node)
   } else if (node.type === 'judgment') {
     // 判断节点单击时选中，显示配置
   }
@@ -1780,11 +1639,6 @@ function onNodeDoubleClick({ node }) {
 }
 
 function openNodeChatTab(node) {
-  // 世界书节点 → 打开管理页面
-  if (node.type === 'worldbook') {
-    openWorldBookPage(node)
-    return
-  }
   // 判断节点无聊天，双击不做任何事
   if (node.type === 'judgment') return
   // 输出节点打开输出页面
@@ -2069,14 +1923,6 @@ async function transferToLibrary() {
   font-family: monospace; font-size: 0.8rem; white-space: pre-wrap;
   max-height: 200px; overflow-y: auto; margin: 0;
 }
-
-.picker-tab {
-  flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px;
-  cursor: pointer; font-size: 0.85rem; text-align: center; transition: all 0.15s;
-}
-.picker-tab.active { background: #f0f7ff; border-color: #3498db; color: #3498db; font-weight: 600; }
-.picker-tab input { display: none; }
-.full-width { width: 100%; }
 
 /* ── 输入源队列（在右侧配置面板内）─── */
 .queue-actions { display: flex; gap: 8px; margin: 8px 0; }

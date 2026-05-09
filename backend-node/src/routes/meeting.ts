@@ -288,26 +288,27 @@ export function registerMeetingRoutes(app: Express): void {
           return createPipelineObject(fileName.replace(/\.[^.]+$/, ''), [{ path: fileName, content }])
         });
 
-        // 构建 per-book 世界书映射
+        // 构建 per-book 世界书映射：加载所有书
         const worldbookMap = new Map<string, string>();
         const perNodeWorldBook = new Map<string, string>();
-
-        // 从请求中读取 worldbook_books 列表
-        if (config.worldbook_books && Array.isArray(config.worldbook_books)) {
-          for (const book of config.worldbook_books) {
-            const bookPath = `${project.path}/worldbooks/${book.bookId}.json`;
-            try {
-              if (fs.existsSync(bookPath)) {
+        const worldbooksDir = `${project.path}/worldbooks`;
+        try {
+          if (fs.existsSync(worldbooksDir)) {
+            for (const file of fs.readdirSync(worldbooksDir)) {
+              if (!file.endsWith('.json') || file.endsWith('_commits.json')) continue;
+              const bookId = file.replace('.json', '');
+              const bookPath = `${worldbooksDir}/${file}`;
+              try {
                 const wb = JSON.parse(fs.readFileSync(bookPath, 'utf-8'));
                 const entries = wb.entries || {};
                 const text = Object.values(entries)
                   .map((e: any) => `${e.keys?.[0] || ''}: ${e.content || ''}`)
                   .join('\n');
-                worldbookMap.set(book.bookId, text);
-              }
-            } catch {}
+                worldbookMap.set(bookId, text);
+              } catch {}
+            }
           }
-        }
+        } catch {}
 
         // 从请求中读取 per-node worldbook bindings
         if (config.worldbook_bindings && typeof config.worldbook_bindings === 'object') {

@@ -103,7 +103,6 @@ export interface MeetingConfig {
   collaborationMode: 'semi_auto' | 'full_auto' | 'manual';
   maxRounds: number;
   maxSpeeches?: number;
-  worldbook_books?: Array<{ bookId: string; name: string }>;
   worldbook_bindings?: Record<string, string>;  // nodeId → bookId
 }
 
