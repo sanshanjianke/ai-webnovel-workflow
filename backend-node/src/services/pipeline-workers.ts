@@ -98,14 +98,12 @@ async function dispatchToDownstream(
 /** 为指定节点解析世界书文本 */
 /** 获取指定书的条目文本，按上下文关键词过滤 */
 function resolveWorldbook(nodeId: string, contextTokens: string[], state: WorkerSharedState): string {
-  // 确定要用的书
   const boundBookId = state.perNodeWorldBook.get(nodeId);
   let entries: WorldBookEntry[] = [];
 
   if (boundBookId && state.worldbookEntries.has(boundBookId)) {
     entries = state.worldbookEntries.get(boundBookId)!;
   } else {
-    // 未绑定：合并所有书的条目
     for (const bookEntries of state.worldbookEntries.values()) {
       entries.push(...bookEntries);
     }
@@ -113,34 +111,88 @@ function resolveWorldbook(nodeId: string, contextTokens: string[], state: Worker
 
   if (entries.length === 0) return state.worldbook;
 
-  // 按关键词过滤（模拟 STStyleWorldBook.getActiveEntries 逻辑）
+  // 按 group 分组（用于互斥选择）
+  const groups = new Map<string, WorldBookEntry[]>();
+  const ungrouped: WorldBookEntry[] = [];
+
   const active: WorldBookEntry[] = [];
   for (const entry of entries) {
     if (entry.disable) continue;
     if (entry.constant) { active.push(entry); continue; }
 
+    // 关键词匹配（支持 caseSensitive / matchWholeWords）
     const primaryHit = entry.keys.some(key =>
-      contextTokens.some(t => t.toLowerCase().includes(key.toLowerCase()))
+      matchKeyword(key, contextTokens, entry.caseSensitive || false, entry.matchWholeWords || false)
     );
     if (!primaryHit) continue;
 
-    // secondaryKeys: AND_ANY 模式下任一命中即可
+    // secondaryKeys + selectiveLogic
     if (entry.selective !== false && entry.secondaryKeys && entry.secondaryKeys.length > 0) {
       const logic = entry.selectiveLogic || 'AND_ANY';
       const secondaryHit = (sk: string) =>
-        contextTokens.some(t => t.toLowerCase().includes(sk.toLowerCase()));
+        contextTokens.some(t => matchKeyword(sk, [t], entry.caseSensitive || false, entry.matchWholeWords || false));
 
       if (logic === 'AND_ALL' && !entry.secondaryKeys.every(sk => secondaryHit(sk))) continue;
       if (logic === 'NOT_ALL' && entry.secondaryKeys.every(sk => secondaryHit(sk))) continue;
       if (logic === 'NOT_ANY' && entry.secondaryKeys.some(sk => secondaryHit(sk))) continue;
     }
 
-    active.push(entry);
+    // probability 概率检查
+    const prob = entry.probability ?? 100;
+    if (prob < 100 && Math.random() * 100 > prob) continue;
+
+    // 有 group 的先分组，后面做互斥选择
+    if (entry.group) {
+      if (!groups.has(entry.group)) groups.set(entry.group, []);
+      groups.get(entry.group)!.push(entry);
+    } else {
+      ungrouped.push(entry);
+    }
   }
 
-  active.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+  // 每组选一个（按 groupWeight 加权随机）
+  for (const [, groupEntries] of groups) {
+    if (groupEntries.length === 1) {
+      active.push(groupEntries[0]);
+    } else {
+      const totalWeight = groupEntries.reduce((sum, e) => sum + (e.groupWeight || 100), 0);
+      let roll = Math.random() * totalWeight;
+      for (const e of groupEntries) {
+        roll -= (e.groupWeight || 100);
+        if (roll <= 0) { active.push(e); break; }
+      }
+    }
+  }
+  active.push(...ungrouped);
+
+  // 排序：先按 position 分组，再按 priority 降序
+  const posOrder: Record<string, number> = {
+    'before_char': 0, 'an_top': 0, 'em_top': 0,
+    'at_depth': 1,
+    'after_char': 2, 'an_bottom': 2, 'em_bottom': 2
+  };
+  active.sort((a, b) => {
+    const pa = posOrder[a.position || 'before_char'] ?? 1;
+    const pb = posOrder[b.position || 'before_char'] ?? 1;
+    if (pa !== pb) return pa - pb;
+    return (b.priority || 0) - (a.priority || 0);
+  });
 
   return active.map(e => `${e.keys?.[0] || e.id}: ${e.content}`).join('\n') || state.worldbook;
+}
+
+/** 关键词匹配（支持大小写敏感和全词匹配） */
+function matchKeyword(key: string, tokens: string[], caseSensitive: boolean, wholeWords: boolean): boolean {
+  if (wholeWords) {
+    const flags = caseSensitive ? 'g' : 'gi';
+    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`\\b${escaped}\\b`, flags);
+    return tokens.some(t => re.test(t));
+  }
+  return tokens.some(t => {
+    if (caseSensitive) return t.includes(key);
+    return t.toLowerCase().includes(key.toLowerCase());
+  });
 }
 
 // ======================== 处理函数（产生 SSE 事件，通过 emit 回调交出） ========================
