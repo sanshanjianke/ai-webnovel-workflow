@@ -142,7 +142,7 @@ async function startMeeting(config) {
 }
 
 function handleSSEEvent(type, data) {
-  console.log(`[SSE] ${type}`, data)
+  // console.log(`[SSE] ${type}`, data)  // 流太大，调试时再打开
   
   // 统一字段名：expertId -> expert_id, expertType -> expert_type
   const normalizedData = {
@@ -305,7 +305,7 @@ function broadcast(type, data) {
   }
   const ts = new Date().toISOString()
   const message = { type, data, timestamp: ts }
-  console.log('[BROADCAST] Sending:', type, data)
+  // console.log('[BROADCAST] Sending:', type, data)  // 流太大，调试时再打开
   chatChannel.postMessage(message)
   // 缓冲消息以供新打开的窗口同步
   const cid = data.container_id || data.expert_id || data.node_id || 'solo'
