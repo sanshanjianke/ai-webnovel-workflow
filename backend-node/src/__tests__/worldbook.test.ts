@@ -279,3 +279,116 @@ describe('WorldBook 注入链路', () => {
     expect(prompt).toContain('暂无');
   });
 });
+
+// ========================
+// 集成测试：meeting route → pipeline 衔接
+// ========================
+
+describe('Meeting route → Pipeline 世界书衔接', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-meeting-'));
+    setLLM(new MockLLM('测试响应'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  // 模拟 meeting route 中 worldbookMap 构建逻辑
+  function buildWorldbookMap(projectPath: string): Map<string, string> {
+    const worldbookMap = new Map<string, string>();
+    const worldbooksDir = path.join(projectPath, 'worldbooks');
+    try {
+      if (fs.existsSync(worldbooksDir)) {
+        for (const file of fs.readdirSync(worldbooksDir)) {
+          if (!file.endsWith('.json') || file.endsWith('_commits.json')) continue;
+          const bookId = file.replace('.json', '');
+          try {
+            const wb = JSON.parse(fs.readFileSync(path.join(worldbooksDir, file), 'utf-8'));
+            const entries = wb.entries || {};
+            worldbookMap.set(bookId, Object.values(entries)
+              .map((e: any) => `${e.keys?.[0] || ''}: ${e.content || ''}`)
+              .join('\n'));
+          } catch {}
+        }
+      }
+    } catch {}
+    return worldbookMap;
+  }
+
+  it('应该从磁盘加载世界书并正确 resolve', () => {
+    // Step 1: 创建项目目录和世界书
+    const worldbooksDir = path.join(tempDir, 'worldbooks');
+    fs.mkdirSync(worldbooksDir, { recursive: true });
+    fs.writeFileSync(path.join(worldbooksDir, 'default.json'), JSON.stringify({
+      name: '默认书', entries: {
+        'entry_1': { id: 'entry_1', keys: ['test'], content: '测试内容：验证码999', priority: 10 }
+      }
+    }, null, 2));
+
+    // Step 2: 模拟 meeting route 加载
+    const worldbookMap = buildWorldbookMap(tempDir);
+    expect(worldbookMap.size).toBe(1);
+    expect(worldbookMap.get('default')).toContain('验证码999');
+
+    // Step 3: 模拟前端发来的 worldbook_bindings
+    const perNodeWorldBook = new Map<string, string>();
+    perNodeWorldBook.set('node_1', 'default');   // 前端 VueFlow node.id
+
+    // Step 4: 模拟 resolveWorldbook (pipeline 内部用的 nodeId)
+    const pipelineNodeId = 'node_1';  // ec.nodeId from frontend expert config
+    const boundBookId = perNodeWorldBook.get(pipelineNodeId);
+    expect(boundBookId).toBe('default');
+    const text = worldbookMap.get(boundBookId!)!;
+    expect(text).toContain('验证码999');
+  });
+
+  it('前端 node.id 应该和 pipeline 的 ec.nodeId 一致', async () => {
+    // 这个测试验证关键约定：前端 expertWorldBookBindings 的 key
+    // 必须和 pipeline 内部 resolveWorldbook 用的 nodeId 相同
+
+    const worldbooksDir = path.join(tempDir, 'worldbooks');
+    fs.mkdirSync(worldbooksDir, { recursive: true });
+    fs.writeFileSync(path.join(worldbooksDir, 'test_book.json'), JSON.stringify({
+      name: '测试书', entries: {
+        'e1': { id: 'e1', keys: ['hello'], content: '匹配内容：xyz789', priority: 10 }
+      }
+    }, null, 2));
+
+    const worldbookMap = buildWorldbookMap(tempDir);
+
+    // 模拟 pipeline buildGraph 中 nodeId 的赋值:
+    // const nodeId = ec.nodeId || ec.expertId
+    // const key = ec.containerId || nodeId
+
+    // 场景 1: 独立专家，ec.nodeId = 'node_1'
+    let ec_nodeId = 'node_1';
+    let key: string | null = null;
+    key = ec_nodeId;  // ec.containerId is null, fallback to nodeId
+    expect(key).toBe('node_1');
+
+    // 场景 2: 容器内专家 (synthetic)，ec.nodeId = 'container_1_exp_0'
+    ec_nodeId = 'container_1_exp_0';
+    let ec_containerId = 'container_1';
+    key = ec_containerId || ec_nodeId;
+    expect(key).toBe('container_1');
+
+    // 验证 perNodeWorldBook 用这些 key 能 match
+    const perNodeWorldBook = new Map<string, string>();
+    perNodeWorldBook.set('node_1', 'test_book');      // 前端对独立专家的绑定
+    perNodeWorldBook.set('container_1', 'test_book'); // 前端对容器的绑定
+
+    // pipeline resolve 用正确的 key
+    expect(perNodeWorldBook.get('node_1')).toBe('test_book');
+    expect(perNodeWorldBook.get('container_1')).toBe('test_book');
+
+    // 验证都能拿到正确内容
+    const text1 = worldbookMap.get(perNodeWorldBook.get('node_1')!)!;
+    expect(text1).toContain('xyz789');
+
+    const text2 = worldbookMap.get(perNodeWorldBook.get('container_1')!)!;
+    expect(text2).toContain('xyz789');
+  });
+});

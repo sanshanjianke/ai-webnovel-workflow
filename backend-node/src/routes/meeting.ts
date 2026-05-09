@@ -171,7 +171,8 @@ export function registerMeetingRoutes(app: Express): void {
       pipeline_version: pipelineVersion = 1,
       queueFiles = [],
       queue_files: queueFilesAlt = [],
-      agent_configs: agentConfigs = {}
+      agent_configs: agentConfigs = {},
+      worldbook_bindings: worldbookBindings = {}
     } = req.body;
 
     // 支持两种字段名
@@ -212,7 +213,8 @@ export function registerMeetingRoutes(app: Express): void {
       edges: edges as EdgeConfig[],
       collaborationMode: 'semi_auto',
       maxRounds: 3,
-      maxSpeeches: 0
+      maxSpeeches: 0,
+      worldbook_bindings: worldbookBindings as Record<string, string>
     };
 
     // 设置 SSE
