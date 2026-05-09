@@ -109,7 +109,8 @@ function resolveWorldbook(nodeId: string, contextTokens: string[], state: Worker
     }
   }
 
-  if (entries.length === 0) return state.worldbook;
+  console.log('[WB-RESOLVE] nodeId:', nodeId, 'boundBookId:', boundBookId, 'totalEntries:', entries.length, 'contextTokens:', contextTokens.join('|').slice(0, 80));
+  if (entries.length === 0) { console.log('[WB-RESOLVE] NO ENTRIES'); return state.worldbook; }
 
   // 按 group 分组（用于互斥选择）
   const groups = new Map<string, WorldBookEntry[]>();
@@ -178,7 +179,10 @@ function resolveWorldbook(nodeId: string, contextTokens: string[], state: Worker
     return (b.priority || 0) - (a.priority || 0);
   });
 
-  return active.map(e => `${e.keys?.[0] || e.id}: ${e.content}`).join('\n') || state.worldbook;
+  const result = active.map(e => `${e.keys?.[0] || e.id}: ${e.content}`).join('\n');
+  console.log('[WB-RESOLVE] matched', active.length, 'entries, text length:', result.length);
+  if (active.length > 0) console.log('[WB-RESOLVE] first entry:', active[0].keys, active[0].content.slice(0, 50));
+  return result || state.worldbook;
 }
 
 /** 关键词匹配（支持大小写敏感和全词匹配） */
