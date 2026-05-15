@@ -11,7 +11,7 @@ import { loadCheckpoint, deleteCheckpoint, cleanIncompleteRound, restoreObjects 
 import {
   MeetingConfig, ExpertConfig, ContainerConfig, EdgeConfig,
   ExpertRole, Granularity, UserFeedback, ExpertDefinition, AgentStopConfig,
-  WorldBookSummaryConfig
+  WorldBookSummaryConfig, PreprocessConfig
 } from '../protocols';
 import { SSEWriter } from '../utils/sse';
 import { listExperts } from '../experts';
@@ -193,7 +193,8 @@ export function registerMeetingRoutes(app: Express): void {
         nodeId: (e.nodeId || e.node_id) as string | undefined,
         nodeType: (e.nodeType || e.node_type) as string | undefined,
         interruptMode: (e.interruptMode || e.interrupt_mode || 'every_n_msgs') as 'auto' | 'every_n_msgs' | 'every_n_tokens' | 'on_mention',
-        interruptThreshold: (e.interruptThreshold || e.interrupt_threshold || 1) as number
+        interruptThreshold: (e.interruptThreshold || e.interrupt_threshold || 1) as number,
+        preprocessConfig: (e.preprocessConfig || e.preprocess_config) as PreprocessConfig | undefined
       })),
       containers: (containers as Array<Record<string, unknown>>).map((c) => ({
         containerId: (c.containerId || c.container_id) as string,
@@ -614,6 +615,25 @@ export function registerMeetingRoutes(app: Express): void {
     fs.writeFileSync(outputPath, JSON.stringify(req.body, null, 2), 'utf-8');
 
     res.json({ status: 'saved' });
+  });
+
+  // 下载完整管道产出（非截断版本，从磁盘读取）
+  app.get('/api/projects/:projectId/meeting/download', (req: Request, res: Response) => {
+    const project = pm.getProject(req.params.projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const fullOutputPath = `${project.path}/pipeline_full_output.json`;
+
+    if (!fs.existsSync(fullOutputPath)) {
+      return res.status(404).json({ error: 'No pipeline output found. Run a pipeline first.' });
+    }
+
+    try {
+      const fullOutput = JSON.parse(fs.readFileSync(fullOutputPath, 'utf-8'));
+      res.json(fullOutput);
+    } catch (error) {
+      res.status(500).json({ error: String(error) });
+    }
   });
 
   // 保存画布设计

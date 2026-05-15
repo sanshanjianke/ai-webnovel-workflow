@@ -695,20 +695,27 @@ const importToDir = () => {
 const handleImport = async (event) => {
   const file = event.target.files?.[0]
   if (!file) return
-  
+
   const formData = new FormData()
   formData.append('file', file)
-  
+
   try {
-    await fetch(`${apiBase.value}/import?directory=${encodeURIComponent(importDirectory.value)}`, {
+    const resp = await fetch(`${apiBase.value}/import?directory=${encodeURIComponent(importDirectory.value)}`, {
       method: 'POST',
       body: formData
     })
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}))
+      alert('导入失败: ' + (errData.error || resp.statusText))
+      event.target.value = ''
+      return
+    }
     await refresh()
   } catch (err) {
     console.error('Import failed:', err)
+    alert('导入失败: ' + err.message)
   }
-  
+
   event.target.value = ''
 }
 

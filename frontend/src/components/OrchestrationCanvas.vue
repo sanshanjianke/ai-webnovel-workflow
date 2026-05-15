@@ -99,6 +99,7 @@
           <button class="toolbar-btn" @click="addRAGIcon" title="RAG节点（检索）">🔍</button>
           <span class="toolbar-sep"></span>
           <button class="toolbar-btn" @click="addInputSource" title="输入源节点（队列.md文件）">📥</button>
+          <button class="toolbar-btn" @click="addPreprocessor" title="预处理节点（拆分/清洗/合并文本）">✂️</button>
           <button class="toolbar-btn" @click="addJudgment" title="判断节点（审核通过/打回）">⚖️</button>
           <button class="toolbar-btn" @click="addOutput" title="输出节点（收集结果）">📤</button>
           <button class="toolbar-btn" @click="saveDesign" :disabled="!projectId || saveStatus === 'saving'" :title="saveStatus === 'saved' ? '已保存' : saveStatus === 'error' ? '保存失败' : '保存到文档库'">
@@ -417,6 +418,125 @@
         </div>
       </div>
 
+      <!-- ── 右侧面板：预处理节点 ── -->
+      <div class="config-panel" v-else-if="selectedNode && selectedNode.type === 'preprocessor'">
+        <div class="panel-header-row">
+          <h4>✂️ 预处理管线</h4>
+          <button class="btn-back" @click="selectedNode = null">← 返回</button>
+        </div>
+
+        <div class="config-field">
+          <label>输出模式</label>
+          <select v-model="selectedNode.data.preprocessConfig.outputMode" @change="onPreprocessChange">
+            <option value="expand">分流 (1→N)：每个分块独立流转</option>
+            <option value="pack">归并 (N→1)：全部分块打包为一个对象</option>
+          </select>
+        </div>
+
+        <div style="display:flex;gap:6px;margin:8px 0;">
+          <button class="btn btn-sm btn-primary" @click="addPreprocessStage">+ 添加阶段</button>
+          <select v-model="presetTemplate" @change="loadPresetTemplate" style="font-size:0.8rem;">
+            <option value="">预设模板...</option>
+            <option value="novel_standard">网文拆书(标准)</option>
+            <option value="novel_simple">网文拆书(简单)</option>
+            <option value="token_split">长文通用拆分</option>
+            <option value="line_split">按行拆分</option>
+            <option value="blank">空白模板</option>
+          </select>
+        </div>
+
+        <div v-if="stages.length === 0" style="color:#999;font-size:0.8rem;padding:12px 0;">
+          尚未添加阶段。点击"+ 添加阶段"或从预设模板开始。
+        </div>
+
+        <div v-for="(stage, i) in stages" :key="stage.id" class="stage-card">
+          <div class="stage-header">
+            <span class="stage-idx">{{ i + 1 }}</span>
+            <input v-model="stage.label" placeholder="阶段名称" class="stage-label-input" @change="onPreprocessChange" />
+            <label class="stage-enable">
+              <input type="checkbox" v-model="stage.enabled" @change="onPreprocessChange" /> 启用
+            </label>
+            <button class="btn-x" @click="removePreprocessStage(i)" title="删除此阶段">✕</button>
+          </div>
+          <div class="stage-config">
+            <select v-model="stage.type" @change="onStageTypeChange(i)" style="font-size:0.75rem;">
+              <option value="replace">替换（正则清洗）</option>
+              <option value="split_regex">按正则拆分</option>
+              <option value="split_token">按 token 数拆分</option>
+              <option value="split_lines">按行数拆分</option>
+              <option value="window_group">窗口合并</option>
+              <option value="custom">自定义代码</option>
+            </select>
+
+            <!-- replace config -->
+            <template v-if="stage.type === 'replace'">
+              <input v-model="stage.config.pattern" placeholder="正则表达式" @change="onPreprocessChange" />
+              <input v-model="stage.config.replacement" placeholder="替换为" @change="onPreprocessChange" />
+              <label><input type="checkbox" v-model="stage.config.flags_g" @change="onFlagsChange(stage)" /> 全局</label>
+              <label><input type="checkbox" v-model="stage.config.flags_i" @change="onFlagsChange(stage)" /> 忽略大小写</label>
+            </template>
+
+            <!-- split_regex config -->
+            <template v-if="stage.type === 'split_regex'">
+              <select v-model="stage.config.preset" @change="onRegexPresetChange(stage)" style="font-size:0.75rem;">
+                <option value="cn_chapter">中文网文（第X章）</option>
+                <option value="cn_section">中文网文（第X节）</option>
+                <option value="cn_volume_chapter">中文网文（第X卷第Y章）</option>
+                <option value="en_chapter">英文小说（Chapter X）</option>
+                <option value="en_part">英文小说（Part X）</option>
+                <option value="double_newline">双换行分隔</option>
+                <option value="custom">自定义正则</option>
+              </select>
+              <input v-model="stage.config.pattern" placeholder="正则表达式" @change="onPreprocessChange" :disabled="stage.config.preset !== 'custom'" />
+              <label><input type="checkbox" v-model="stage.config.includeSeparator" @change="onPreprocessChange" /> 保留章节标题</label>
+            </template>
+
+            <!-- split_token config -->
+            <template v-if="stage.type === 'split_token'">
+              <label>最大 token 数:</label>
+              <input v-model.number="stage.config.maxTokens" type="number" min="100" @change="onPreprocessChange" placeholder="3000" />
+              <label>重叠:</label>
+              <input v-model.number="stage.config.overlap" type="number" min="0" @change="onPreprocessChange" placeholder="200" />
+            </template>
+
+            <!-- split_lines config -->
+            <template v-if="stage.type === 'split_lines'">
+              <label>最大行数:</label>
+              <input v-model.number="stage.config.maxLines" type="number" min="1" @change="onPreprocessChange" placeholder="100" />
+              <label>重叠行数:</label>
+              <input v-model.number="stage.config.overlap" type="number" min="0" @change="onPreprocessChange" placeholder="0" />
+            </template>
+
+            <!-- window_group config -->
+            <template v-if="stage.type === 'window_group'">
+              <label>主单元块数 n:</label>
+              <input v-model.number="stage.config.groupSize" type="number" min="1" @change="onPreprocessChange" placeholder="5" />
+              <label>前文上下文 i:</label>
+              <input v-model.number="stage.config.contextBefore" type="number" min="0" @change="onPreprocessChange" placeholder="2" />
+              <label>后文上下文 i:</label>
+              <input v-model.number="stage.config.contextAfter" type="number" min="0" @change="onPreprocessChange" placeholder="2" />
+              <span v-if="stage.config.groupSize" style="font-size:0.7rem;color:#666;">
+                每组 = {{ stage.config.contextBefore || 0 }}+{{ stage.config.groupSize || 0 }}+{{ stage.config.contextAfter || 0 }} = {{ (stage.config.contextBefore || 0) + (stage.config.groupSize || 0) + (stage.config.contextAfter || 0) }} 块
+              </span>
+            </template>
+
+            <!-- custom config -->
+            <template v-if="stage.type === 'custom'">
+              <select v-model="stage.config.language" @change="onPreprocessChange" style="font-size:0.75rem;">
+                <option value="javascript">JavaScript</option>
+                <option value="python">Python</option>
+                <option value="perl">Perl</option>
+              </select>
+              <textarea v-model="stage.customCode" placeholder="// 函数体代码&#10;// JS: return segments.flatMap(...)&#10;// Python/Perl: 直接操作 segments 列表" rows="6" @change="onPreprocessChange" style="font-family:monospace;font-size:0.7rem;"></textarea>
+            </template>
+          </div>
+        </div>
+
+        <div class="config-actions" style="margin-top:8px;">
+          <button class="btn btn-danger btn-sm" @click="removeNode">删除节点</button>
+        </div>
+      </div>
+
       <!-- ── 右侧面板：会议总配置 ── -->
       <div class="config-panel" v-else>
         <h4>当前配置</h4>
@@ -563,6 +683,7 @@ import GroupNode from './GroupNode.vue'
 import InputSourceNode from './InputSourceNode.vue'
 import OutputNode from './OutputNode.vue'
 import JudgmentNode from './JudgmentNode.vue'
+import PreprocessNode from './PreprocessNode.vue'
 import WorldBookIconNode from './WorldBookIconNode.vue'
 import RAGIconNode from './RAGIconNode.vue'
 import JSZip from 'jszip'
@@ -577,7 +698,7 @@ const props = defineProps({
   layer: { type: String, default: 'l2' }
 })
 
-const nodeTypes = { expert: markRaw(ExpertNode), container: markRaw(GroupNode), inputSource: markRaw(InputSourceNode), output: markRaw(OutputNode), judgment: markRaw(JudgmentNode), worldbookIcon: markRaw(WorldBookIconNode), ragIcon: markRaw(RAGIconNode) }
+const nodeTypes = { expert: markRaw(ExpertNode), container: markRaw(GroupNode), inputSource: markRaw(InputSourceNode), output: markRaw(OutputNode), judgment: markRaw(JudgmentNode), preprocessor: markRaw(PreprocessNode), worldbookIcon: markRaw(WorldBookIconNode), ragIcon: markRaw(RAGIconNode) }
 
 const nodes = ref([])
 const edges = ref([])
@@ -640,6 +761,27 @@ const queueFiles = ref([])
 const fileInput = ref(null)
 const queueDragOver = ref(false)
 
+function detectEncoding(buffer) {
+  // 先试 UTF-8
+  const utf8Text = new TextDecoder('utf-8', { fatal: false }).decode(buffer)
+  // 统计 CJK 字符
+  const cjkCount = (utf8Text.match(/[一-鿿㐀-䶿]/g) || []).length
+  // 中文文本每 200 字节应至少有 1 个中文字符
+  const minExpected = Math.floor(buffer.byteLength / 200)
+  if (cjkCount >= minExpected) {
+    return { text: utf8Text, encoding: 'utf-8' }
+  }
+  // UTF-8 中文太少，尝试 GBK
+  try {
+    const gbkText = new TextDecoder('gbk', { fatal: false }).decode(buffer)
+    const gbkCjk = (gbkText.match(/[一-鿿㐀-䶿]/g) || []).length
+    if (gbkCjk > cjkCount) {
+      return { text: gbkText, encoding: 'gbk' }
+    }
+  } catch {}
+  return { text: utf8Text, encoding: 'utf-8' }
+}
+
 function onFilesSelected(event) {
   const files = event.target.files
   if (!selectedNode.value || selectedNode.value.type !== 'inputSource') return
@@ -647,9 +789,12 @@ function onFilesSelected(event) {
   for (const f of files) {
     const reader = new FileReader()
     reader.onload = (e) => {
-      selectedNode.value.data.files.push({ name: f.name, content: e.target.result })
+      const buffer = new Uint8Array(e.target.result)
+      const { text, encoding } = detectEncoding(buffer)
+      console.log(`[编码检测] ${f.name}: ${encoding} (${text.length} 字符, CJK: ${(text.match(/[一-鿿]/g) || []).length})`)
+      selectedNode.value.data.files.push({ name: f.name, content: text })
     }
-    reader.readAsText(f)
+    reader.readAsArrayBuffer(f)
   }
   event.target.value = ''
 }
@@ -698,6 +843,125 @@ const containerChildren = computed(() => {
   if (!selectedNode.value || selectedNode.value.type !== 'container') return []
   return (selectedNode.value.data.experts || []).map(e => e.expertId)
 })
+
+// ── 预处理节点配置 ──
+const presetTemplate = ref('')
+const REGEX_PRESET_PATTERNS = {
+  cn_chapter: '(?:^|\\n)\\s*第[零一二三四五六七八九十百千万\\d]+章[^\\n]*',
+  cn_section: '(?:^|\\n)\\s*第[零一二三四五六七八九十百千万\\d]+节[^\\n]*',
+  cn_volume_chapter: '(?:^|\\n)\\s*第[零一二三四五六七八九十百千万\\d]+卷[^\\n]*第[零一二三四五六七八九十百千万\\d]+章[^\\n]*',
+  en_chapter: '(?:^|\\n)\\s*(?:Chapter|CH|Ch\\.?)\\s*\\d+[^\\n]*',
+  en_part: '(?:^|\\n)\\s*(?:Part|PART)\\s*[IVX\\d]+[^\\n]*',
+  double_newline: '(?:^|\\n)\\n{2,}',
+  custom: ''
+}
+
+const stages = computed(() => {
+  const node = selectedNode.value
+  if (!node || node.type !== 'preprocessor') return []
+  return node.data.preprocessConfig?.stages || []
+})
+
+function addPreprocessStage() {
+  const node = selectedNode.value
+  if (!node || node.type !== 'preprocessor') return
+  if (!node.data.preprocessConfig) node.data.preprocessConfig = { stages: [], outputMode: 'expand' }
+  node.data.preprocessConfig.stages.push({
+    id: 'stage_' + Date.now(),
+    type: 'split_regex',
+    enabled: true,
+    label: '新阶段',
+    config: { preset: 'cn_chapter', pattern: REGEX_PRESET_PATTERNS.cn_chapter, includeSeparator: true }
+  })
+}
+
+function removePreprocessStage(i) {
+  const node = selectedNode.value
+  if (!node || node.type !== 'preprocessor') return
+  node.data.preprocessConfig.stages.splice(i, 1)
+}
+
+function onStageTypeChange(i) {
+  const stage = stages.value[i]
+  if (!stage) return
+  // 重置 config 为类型默认值
+  if (stage.type === 'replace') {
+    stage.config = { pattern: '', replacement: '', flags_g: true, flags_i: false }
+  } else if (stage.type === 'split_regex') {
+    stage.config = { preset: 'cn_chapter', pattern: REGEX_PRESET_PATTERNS.cn_chapter, includeSeparator: true }
+  } else if (stage.type === 'split_token') {
+    stage.config = { maxTokens: 3000, overlap: 200 }
+  } else if (stage.type === 'split_lines') {
+    stage.config = { maxLines: 100, overlap: 0 }
+  } else if (stage.type === 'window_group') {
+    stage.config = { groupSize: 5, contextBefore: 2, contextAfter: 2 }
+  } else if (stage.type === 'custom') {
+    stage.config = { language: 'javascript' }
+    stage.customCode = ''
+  }
+}
+
+function onRegexPresetChange(stage) {
+  stage.config.pattern = REGEX_PRESET_PATTERNS[stage.config.preset] || ''
+}
+
+function onFlagsChange(stage) {
+  const flags = []
+  if (stage.config.flags_g) flags.push('g')
+  if (stage.config.flags_i) flags.push('i')
+  stage.config.flags = flags.join('')
+}
+
+function onPreprocessChange() {
+  // 直接修改 selectedNode.data，Vue 响应式自动追踪
+}
+
+function loadPresetTemplate() {
+  const node = selectedNode.value
+  if (!node || node.type !== 'preprocessor') return
+  const tpl = presetTemplate.value
+  if (!tpl || tpl === 'blank') {
+    node.data.preprocessConfig = { stages: [], outputMode: 'expand' }
+    presetTemplate.value = ''
+    return
+  }
+
+  const makeId = () => 'stage_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+
+  if (tpl === 'novel_standard') {
+    node.data.preprocessConfig = {
+      outputMode: 'expand',
+      stages: [
+        { id: makeId(), type: 'replace', enabled: true, label: '清理广告', config: { pattern: '', replacement: '', flags: 'g' } },
+        { id: makeId(), type: 'split_regex', enabled: true, label: '按章节拆分', config: { preset: 'cn_chapter', pattern: REGEX_PRESET_PATTERNS.cn_chapter, includeSeparator: true } },
+        { id: makeId(), type: 'window_group', enabled: true, label: '上下文窗口', config: { groupSize: 5, contextBefore: 2, contextAfter: 2 } }
+      ]
+    }
+  } else if (tpl === 'novel_simple') {
+    node.data.preprocessConfig = {
+      outputMode: 'expand',
+      stages: [
+        { id: makeId(), type: 'split_regex', enabled: true, label: '按章节拆分', config: { preset: 'cn_chapter', pattern: REGEX_PRESET_PATTERNS.cn_chapter, includeSeparator: true } }
+      ]
+    }
+  } else if (tpl === 'token_split') {
+    node.data.preprocessConfig = {
+      outputMode: 'expand',
+      stages: [
+        { id: makeId(), type: 'split_token', enabled: true, label: '按token拆分', config: { maxTokens: 3000, overlap: 200 } },
+        { id: makeId(), type: 'window_group', enabled: true, label: '上下文窗口', config: { groupSize: 1, contextBefore: 1, contextAfter: 1 } }
+      ]
+    }
+  } else if (tpl === 'line_split') {
+    node.data.preprocessConfig = {
+      outputMode: 'expand',
+      stages: [
+        { id: makeId(), type: 'split_lines', enabled: true, label: '按行拆分', config: { maxLines: 100, overlap: 0 } }
+      ]
+    }
+  }
+  presetTemplate.value = ''
+}
 
 let nodeCounter = 0
 
@@ -1325,7 +1589,7 @@ function loadContainerConfig(node) {
 // ── 发言顺序计算 ──
 
 const orderedNodes = computed(() => {
-  const allNodes = nodes.value.filter(n => n.type === 'expert' || n.type === 'container' || n.type === 'judgment')
+  const allNodes = nodes.value.filter(n => n.type === 'expert' || n.type === 'container' || n.type === 'judgment' || n.type === 'preprocessor')
   if (allNodes.length === 0) return []
 
   if (edges.value.length === 0) return flattenNodes(allNodes)
@@ -1457,17 +1721,22 @@ function runMeeting() {
     n.data.done = false
   })
 
-  const experts = orderedNodes.value.map(node => ({
-    expert_id: node.type === 'judgment' ? '__judgment__' : node.data.expertId,
-    node_id: node._synthetic ? `${node._containerId}_${node._expertIndex}` : node.id,
-    role: node.data.role || 'main',
-    custom_prompt: node.data.customPrompt || null,
-    container_id: node._synthetic ? node._containerId : (node.parentNode || null),
-    node_type: node.type === 'judgment' ? 'judgment' : undefined,
-    interrupt_mode: node.data.interrupt_mode || 'every_n_msgs',
-    interrupt_threshold: node.data.interrupt_threshold || 1,
-    loop_iteration: node.loopIteration || 0
-  }))
+  const experts = orderedNodes.value.map(node => {
+    const isJudgment = node.type === 'judgment'
+    const isPreprocessor = node.type === 'preprocessor'
+    return {
+      expert_id: isJudgment ? '__judgment__' : (isPreprocessor ? '__preprocessor__' : node.data.expertId),
+      node_id: node._synthetic ? `${node._containerId}_${node._expertIndex}` : node.id,
+      role: node.data.role || 'main',
+      custom_prompt: node.data.customPrompt || null,
+      container_id: node._synthetic ? node._containerId : (node.parentNode || null),
+      node_type: isJudgment ? 'judgment' : (isPreprocessor ? 'preprocessor' : undefined),
+      interrupt_mode: node.data.interrupt_mode || 'every_n_msgs',
+      interrupt_threshold: node.data.interrupt_threshold || 1,
+      loop_iteration: node.loopIteration || 0,
+      preprocess_config: isPreprocessor ? (node.data.preprocessConfig || { stages: [], outputMode: 'expand' }) : undefined
+    }
+  })
 
   const containers = nodes.value
     .filter(n => n.type === 'container')
@@ -1672,6 +1941,22 @@ function addInputSource() {
   updateInputSourceHighlight()
 }
 
+function addPreprocessor() {
+  const id = `preprocess_${++nodeCounter}`
+  nodes.value.push({
+    id, type: 'preprocessor', position: { x: 280, y: 300 },
+    data: {
+      label: '预处理',
+      preprocessConfig: {
+        stages: [],
+        outputMode: 'expand'
+      },
+      selected: false
+    },
+    style: { zIndex: 5 }
+  })
+}
+
 function addOutput() {
   const id = `output_${++nodeCounter}`
   nodes.value.push({
@@ -1724,6 +2009,11 @@ function onNodeClick({ node }) {
     loadContainerConfig(node)
   } else if (node.type === 'inputSource') {
     showQueuePanel.value = true
+  } else if (node.type === 'preprocessor') {
+    // 确保 preprocessConfig 存在
+    if (!node.data.preprocessConfig) {
+      node.data.preprocessConfig = { stages: [], outputMode: 'expand' }
+    }
   } else if (node.type === 'output') {
     // 输出节点单击时只选中，显示属性面板
   } else if (node.type === 'judgment') {
@@ -1812,38 +2102,46 @@ function openChatInline() {
 function hideNodeCtx() { nodeCtx.show = false }
 
 async function downloadOutput() {
-  if (!props.pipelineOutput) {
-    alert('没有可下载的输出数据')
+  if (!props.projectId) {
+    alert('未关联项目')
     return
   }
 
-  // 支持驼峰和下划线两种字段名
-  const nodeOutputs = props.pipelineOutput.node_outputs || props.pipelineOutput.nodeOutputs
-  if (!nodeOutputs) {
-    alert('没有可下载的输出数据')
-    return
-  }
-
-  const keys = Object.keys(nodeOutputs)
-
-  if (keys.length === 0) {
-    alert('没有可下载的输出数据')
-    return
-  }
-
-  if (keys.length === 1) {
-    // 单个文件直接下载
-    const content = nodeOutputs[keys[0]]
-    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
-    saveAs(blob, `${keys[0]}.md`)
-  } else {
-    // 多个文件打包为zip
-    const zip = new JSZip()
-    for (const [nodeId, content] of Object.entries(nodeOutputs)) {
-      zip.file(`${nodeId}.md`, content)
+  try {
+    // 从后端下载完整产出（非截断版本）
+    const resp = await fetch(`/api/projects/${encodeURIComponent(props.projectId)}/meeting/download`)
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: 'Unknown error' }))
+      alert('下载失败: ' + (err.error || resp.statusText))
+      return
     }
-    const blob = await zip.generateAsync({ type: 'blob' })
-    saveAs(blob, 'pipeline_output.zip')
+
+    const fullOutput = await resp.json()
+    const keys = Object.keys(fullOutput)
+    if (keys.length === 0) {
+      alert('没有可下载的输出数据')
+      return
+    }
+
+    if (keys.length === 1) {
+      const key = keys[0]
+      const content = fullOutput[key]
+      // 清理文件名中的路径分隔符
+      const fileName = key.replace(/\//g, '_').replace(/\.md$/, '') + '.md'
+      const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+      saveAs(blob, fileName)
+    } else {
+      const zip = new JSZip()
+      for (const [key, content] of Object.entries(fullOutput)) {
+        const fileName = key.replace(/\//g, '_').replace(/\.md$/, '') + '.md'
+        zip.file(fileName, content)
+      }
+      const blob = await zip.generateAsync({ type: 'blob' })
+      saveAs(blob, 'pipeline_output.zip')
+    }
+  } catch (err) {
+    console.error('Download error:', err)
+    alert('下载失败: ' + err.message)
   }
 }
 

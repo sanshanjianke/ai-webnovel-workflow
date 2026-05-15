@@ -65,6 +65,7 @@ export interface ExpertConfig {
   nodeType?: string;
   interruptMode?: 'auto' | 'every_n_msgs' | 'every_n_tokens' | 'on_mention';
   interruptThreshold?: number;
+  preprocessConfig?: PreprocessConfig;
 }
 
 export interface Expert {
@@ -596,6 +597,7 @@ export interface PipelineObjectMeta {
   rejectCount: number;
   maxRejects: number;
   routePort?: string;
+  [key: string]: any;  // allow extra fields like chunkIndex, totalChunks, outputMode
 }
 
 export interface PipelineObjectFile {
@@ -659,4 +661,37 @@ export interface UserFeedback {
   action: 'approve' | 'modify' | 'stop' | 'call_expert' | 'restart';
   message?: string;
   expertId?: string;
+}
+
+// ============ 预处理节点 ============
+
+export interface TextSegment {
+  content: string;
+  meta: {
+    index: number;
+    title?: string;
+    chapterNumber?: number;
+    charCount: number;
+    [key: string]: any;
+  };
+}
+
+export type PreprocessStageType = 'replace' | 'split_regex' | 'split_token'
+  | 'split_lines' | 'window_group' | 'custom';
+
+export type PreprocessLanguage = 'javascript' | 'python' | 'perl';
+
+export interface StageConfig {
+  id: string;
+  type: PreprocessStageType;
+  enabled: boolean;
+  label: string;
+  language?: PreprocessLanguage;
+  config: Record<string, any>;
+  customCode?: string;
+}
+
+export interface PreprocessConfig {
+  stages: StageConfig[];
+  outputMode: 'expand' | 'pack';
 }

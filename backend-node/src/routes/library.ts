@@ -1,8 +1,11 @@
 // 文档库路由
 import { Express, Request, Response } from 'express';
+import multer from 'multer';
 import { getProjectManager } from '../services/project-manager';
 import { getLibraryManager } from '../services/library';
 import { DocSource, DocStatus } from '../protocols';
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 export function registerLibraryRoutes(app: Express): void {
   const pm = getProjectManager();
@@ -184,12 +187,31 @@ export function registerLibraryRoutes(app: Express): void {
     }
   });
 
-  // 导入文件
-  app.post('/api/projects/:projectId/library/import', (req: Request, res: Response) => {
+  // 导入文件（支持 multipart 文件上传和 JSON body 两种方式）
+  app.post('/api/projects/:projectId/library/import', upload.single('file'), (req: Request, res: Response) => {
     try {
       const library = getLibrary(req.params.projectId);
-      const { name, content, format, directory, tags } = req.body;
-      
+      const directory = (req.query.directory as string) || (req.body.directory as string) || '/';
+      const tags = req.body.tags as string[] | undefined;
+
+      let name: string;
+      let content: string;
+      let format: string;
+
+      if (req.file) {
+        // multipart 文件上传
+        name = req.file.originalname;
+        content = req.file.buffer.toString('utf-8');
+        format = name.split('.').pop() || 'txt';
+      } else if (req.body.content) {
+        // JSON body
+        name = req.body.name || 'imported_file';
+        content = req.body.content;
+        format = req.body.format || 'txt';
+      } else {
+        return res.status(400).json({ error: 'No file or content provided' });
+      }
+
       const uid = library.importFile(name, content, format, directory, tags);
       res.json({ uid, status: 'imported' });
     } catch (error) {

@@ -6,13 +6,14 @@
 import {
   MeetingConfig, ExpertRole, Granularity, ContainerConfig,
   AgentStopConfig, PipelineObject, ExpertContext, ExpertChatLog,
-  WorldBookSummaryConfig, WorldBookSummaryTask
+  WorldBookSummaryConfig, WorldBookSummaryTask, PreprocessConfig
 } from '../protocols';
 import { createExpert } from '../experts';
 import type { BaseExpert } from '../experts/base';
-import { addExpertOutput, buildObjectContext } from '../models/pipeline-object';
+import { addExpertOutput, buildObjectContext, createPipelineObject } from '../models/pipeline-object';
 import { AsyncQueue } from '../utils/queue';
 import { PipelineEventV2 } from './object-pipeline-engine';
+import { runPreprocessPipeline } from './preprocessor';
 
 // ======================== 类型 ========================
 
@@ -28,6 +29,7 @@ export interface NodeWorkerConfig {
   childrenRoles?: Map<string, ExpertRole>;
   containerConfig?: ContainerConfig;
   worldbookSummaryConfig?: WorldBookSummaryConfig;
+  preprocessConfig?: PreprocessConfig;
 }
 
 import { WorldBookEntry } from '../protocols';
@@ -39,12 +41,13 @@ export interface WorkerSharedState {
   globalConfig: MeetingConfig;
   feedbackMap: Map<string, string[]>;
   vision: Record<string, string>;
-  worldbook: string;                              // 向后兼容：所有书的合并文本
-  worldbookEntries: Map<string, WorldBookEntry[]>; // bookId → 条目数组（用于关键词过滤）
-  perNodeWorldBook: Map<string, string>;          // nodeId → bookId 绑定
+  worldbook: string;
+  worldbookEntries: Map<string, WorldBookEntry[]>;
+  perNodeWorldBook: Map<string, string>;
   rag: string;
   outputSeq: { value: number };
-  worldbookTaskQueue?: AsyncQueue<WorldBookSummaryTask>;  // 世界书管理员任务队列
+  worldbookTaskQueue?: AsyncQueue<WorldBookSummaryTask>;
+  allObjects: PipelineObject[];  // 管道中所有对象（含预处理等节点动态创建的）
 }
 
 export const DEFAULT_STOP_CONFIG: AgentStopConfig = {
@@ -758,6 +761,16 @@ ${reportText || '（无产出）'}
       if (!obj.meta) obj.meta = { rejectCount: 0, maxRejects: 3 };
       obj.meta.routePort = verdict;
 
+      // 将裁决结果写入对象文件，供下载和输出页展示
+      const judgmentReport = `# 判断结果\n\n- **裁决**: ${verdict === 'pass' ? '✅ 通过' : '❌ 驳回'}\n- **理由**: ${reason}\n- **驳回次数**: ${obj.meta.rejectCount}\n- **时间**: ${new Date().toISOString()}\n\n## 审核内容\n${inputFiles.map(f => `### ${f.path}\n${f.content.slice(0, 500)}${f.content.length > 500 ? '...' : ''}`).join('\n\n')}`;
+      state.outputSeq.value++;
+      obj.files.push({
+        path: `判断结果_${state.outputSeq.value}.md`,
+        content: judgmentReport,
+        producer: nodeId,
+        category: 'report'
+      });
+
       emit({
         type: 'judgment_complete',
         data: {
@@ -766,6 +779,15 @@ ${reportText || '（无产出）'}
         }
       });
     } catch (err: any) {
+      const errorReport = `# 判断失败\n\n- **错误**: ${err.message}\n- **时间**: ${new Date().toISOString()}`;
+      state.outputSeq.value++;
+      obj.files.push({
+        path: `判断错误_${state.outputSeq.value}.md`,
+        content: errorReport,
+        producer: nodeId,
+        category: 'report'
+      });
+
       emit({
         type: 'judgment_error',
         data: { nodeId, objectId: obj.id, objectName: obj.name, error: err.message }
@@ -777,7 +799,149 @@ ${reportText || '（无产出）'}
     obj.status = 'completed';
     obj.completedAt = new Date().toISOString();
 
+    emit({
+      type: 'object_progress',
+      data: {
+        objectId: obj.id, objectName: obj.name, nodeId,
+        totalFiles: obj.files.length,
+        files: obj.files.map(f => ({ path: f.path, category: f.category, producer: f.producer, content: f.content }))
+      }
+    });
+
     await dispatchToDownstream(nodeId, obj, downstreamQueues, edgePortMap);
+  }
+}
+
+/**
+ * 预处理 Worker
+ * 1→N (expand) 或 N→1 (pack) 分发，取决于 outputMode 配置。
+ */
+export async function preprocessorWorker(
+  nodeId: string,
+  inputQueue: AsyncQueue<PipelineObject>,
+  downstreamQueues: Map<string, AsyncQueue<PipelineObject>>,
+  emit: (event: PipelineEventV2) => void,
+  state: WorkerSharedState,
+  edgePortMap: Map<string, string> = new Map()
+): Promise<void> {
+  const config = state.nodeConfigs.get(nodeId);
+  const preprocessConfig = config?.preprocessConfig;
+
+  while (!state.stopRequested) {
+    await waitIfPaused(state);
+    if (state.stopRequested) break;
+
+    const obj = inputQueue.dequeueSync();
+    if (!obj) {
+      await sleep(1000);
+      continue;
+    }
+
+    obj.status = 'running';
+    obj.currentNodeId = nodeId;
+
+    emit({
+      type: 'preprocess_start',
+      data: { nodeId, objectId: obj.id, objectName: obj.name, stageCount: preprocessConfig?.stages?.filter(s => s.enabled).length || 0 }
+    });
+
+    try {
+      // 获取输入文本（合并所有 input 文件）
+      const inputText = obj.files
+        .filter(f => f.category === 'input')
+        .map(f => f.content)
+        .join('\n\n');
+
+      // 运行预处理管线
+      const stages = preprocessConfig?.stages || [];
+      const outputMode = preprocessConfig?.outputMode || 'expand';
+      const segments = await runPreprocessPipeline(inputText, stages);
+
+      emit({
+        type: 'preprocess_progress',
+        data: { nodeId, objectId: obj.id, totalSegments: segments.length, outputMode }
+      });
+
+      if (outputMode === 'pack') {
+        // ── 归并模式 (N→1)：所有分块打包进一个对象 ──
+        const segmentFiles = segments.map((seg, i) => ({
+          path: `${seg.meta.title || `chunk_${i + 1}`}.md`,
+          content: seg.content
+        }));
+        const packedObj = createPipelineObject(
+          `${obj.name}_预处理结果`,
+          segmentFiles
+        );
+        packedObj.meta = { rejectCount: 0, maxRejects: 3, totalChunks: segments.length, outputMode: 'pack' };
+        packedObj.status = 'completed';
+        packedObj.completedAt = new Date().toISOString();
+
+        state.allObjects.push(packedObj);
+
+        emit({
+          type: 'object_init',
+          data: { objectId: packedObj.id, objectName: packedObj.name, totalChunks: segments.length, outputMode: 'pack' }
+        });
+        for (const [, downQueue] of downstreamQueues) {
+          await downQueue.enqueue(packedObj);
+        }
+      } else {
+        // ── 分流模式 (1→N)：每个分块独立为 PipelineObject ──
+        // 批量创建对象并一次性发送 objects_init（避免 N 个 event 导致 SSE 背压）
+        const chunkObjects: PipelineObject[] = [];
+        for (const seg of segments) {
+          const chunkObj = createPipelineObject(
+            seg.meta.title || `${obj.name}_块${seg.meta.index + 1}`,
+            [{ path: `${obj.name}_块${seg.meta.index + 1}.md`, content: seg.content }]
+          );
+          chunkObj.meta = {
+            rejectCount: 0,
+            maxRejects: 3,
+            chunkIndex: seg.meta.index,
+            totalChunks: segments.length,
+            outputMode: 'expand'
+          };
+          chunkObj.status = 'completed';
+          chunkObj.completedAt = new Date().toISOString();
+          chunkObjects.push(chunkObj);
+        }
+
+        // 批量发送一个聚合事件
+        emit({
+          type: 'objects_init',
+          data: {
+            count: chunkObjects.length,
+            objects: chunkObjects.map(o => ({
+              id: o.id, name: o.name, chunkIndex: o.meta?.chunkIndex, totalChunks: o.meta?.totalChunks
+            }))
+          }
+        });
+
+        // 添加到全局对象列表（供 pipeline_complete 收集）
+        for (const chunkObj of chunkObjects) {
+          state.allObjects.push(chunkObj);
+        }
+
+        // 分发到下游
+        for (const chunkObj of chunkObjects) {
+          for (const [, downQueue] of downstreamQueues) {
+            await downQueue.enqueue(chunkObj);
+          }
+        }
+      }
+    } catch (err: any) {
+      emit({
+        type: 'preprocess_error',
+        data: { nodeId, objectId: obj.id, objectName: obj.name, error: err.message }
+      });
+      obj.status = 'failed';
+    }
+
+    if ((obj.status as string) !== 'failed') {
+      obj.status = 'completed';
+      obj.completedAt = new Date().toISOString();
+    }
+    // 不 dispatch 原始对象——预处理节点消费上游对象，产出新对象到下游
   }
 }
 

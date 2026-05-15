@@ -1,10 +1,11 @@
 // 对象管道引擎 v2 — 分布式 Worker 模型
 // 每个节点是独立 async 函数，while 轮询自己的队列。
 // 引擎只管：建 Worker、收集事件、yield 给 SSE、stop/pause/checkpoint。
+import * as fs from 'fs';
 import {
   MeetingConfig, ExpertRole, Granularity, ContainerConfig,
   AgentStopConfig, PipelineObject, OutputPort, WorldBookSummaryConfig,
-  WorldBookSummaryTask
+  WorldBookSummaryTask, PreprocessConfig
 } from '../protocols';
 import { AsyncQueue } from '../utils/queue';
 import { CheckpointState, saveCheckpoint, deleteCheckpoint } from './recovery-manager';
@@ -12,7 +13,7 @@ import {
   WorkerSharedState, NodeWorkerConfig,
   DEFAULT_STOP_CONFIG, DEFAULT_READ_CATEGORIES,
   inputSourceWorker, expertWorker, groupChatWorker, outputWorker, judgmentWorker,
-  worldbookObserverWorker
+  preprocessorWorker, worldbookObserverWorker
 } from './pipeline-workers';
 
 // ======================== 事件类型 ========================
@@ -26,7 +27,7 @@ export interface PipelineEventV2 {
 
 interface InternalNode {
   id: string;
-  type: 'input' | 'expert' | 'group_chat' | 'output' | 'judgment';
+  type: 'input' | 'expert' | 'group_chat' | 'output' | 'judgment' | 'preprocessor';
   expertId: string;
   role: ExpertRole;
   containerId?: string;
@@ -37,6 +38,7 @@ interface InternalNode {
   containerConfig?: ContainerConfig;
   childrenRoles?: Map<string, ExpertRole>;
   outputPorts?: OutputPort[];
+  preprocessConfig?: PreprocessConfig;
 }
 
 // ======================== 引擎类 ========================
@@ -153,7 +155,8 @@ export class ObjectPipelineEngine {
           role: ec.role,
           containerId: ec.containerId,
           upstream: [],
-          downstream: []
+          downstream: [],
+          preprocessConfig: ec.preprocessConfig
         });
       }
     }
@@ -258,7 +261,8 @@ export class ObjectPipelineEngine {
       worldbookEntries,
       perNodeWorldBook,
       rag: ragContext,
-      outputSeq: { value: resumeFrom?.outputSeq || 0 }
+      outputSeq: { value: resumeFrom?.outputSeq || 0 },
+      allObjects: [...activeObjects]
     };
     this.activeSharedState = sharedState;
 
@@ -294,7 +298,8 @@ export class ObjectPipelineEngine {
         children: node.children,
         childrenRoles: node.childrenRoles,
         containerConfig: node.containerConfig,
-        worldbookSummaryConfig: this.worldbookSummaryConfigs.get(nodeId)
+        worldbookSummaryConfig: this.worldbookSummaryConfigs.get(nodeId),
+        preprocessConfig: node.preprocessConfig
       });
     }
 
@@ -317,7 +322,7 @@ export class ObjectPipelineEngine {
       eventQueue.enqueue(event).catch(() => {});
     };
 
-    // yield 启动事件
+    // yield 启动事件（不含文件内容，避免 SSE 事件过大）
     const allNodeIds = [...this.nodes.keys()].filter(id => id !== inputId && id !== outputId);
     yield {
       type: 'pipeline_start_v2',
@@ -328,7 +333,7 @@ export class ObjectPipelineEngine {
         objects: activeObjects.map(o => ({
           id: o.id,
           name: o.name,
-          files: o.files.map(f => ({ path: f.path, category: f.category, producer: f.producer, content: f.content }))
+          files: o.files.map(f => ({ path: f.path, category: f.category, producer: f.producer }))
         }))
       }
     };
@@ -358,6 +363,9 @@ export class ObjectPipelineEngine {
           break;
         case 'judgment':
           promise = judgmentWorker(nodeId, inQueue, downQueues, emit, sharedState, edgePortMap);
+          break;
+        case 'preprocessor':
+          promise = preprocessorWorker(nodeId, inQueue, downQueues, emit, sharedState, edgePortMap);
           break;
         case 'output':
           promise = outputWorker(nodeId, inQueue, downQueues, emit, sharedState);
@@ -422,6 +430,9 @@ export class ObjectPipelineEngine {
     // 等待 Workers 退出
     try { await workersDone; } catch {}
 
+    // 保存所有对象引用（在清理 activeSharedState 之前）
+    const allObjs: PipelineObject[] = (sharedState.allObjects?.length ? sharedState.allObjects : activeObjects);
+
     this.state = this.stopRequested ? 'stopped' : 'completed';
     this.activeSharedState = null;
     this.activeEventBus = null;
@@ -431,32 +442,55 @@ export class ObjectPipelineEngine {
       deleteCheckpoint(this.checkpointDir, this.meetingId);
     }
 
-    // pipeline_complete — 从对象中提取产出文件
+    // pipeline_complete — 从所有对象（含动态创建的）中提取产出文件
     const nodeOutputs: Record<string, string> = {};
+    const nodeOutputsFull: Record<string, string> = {};
     const reportFiles: string[] = [];
-    for (const obj of activeObjects) {
+    for (const obj of allObjs) {
       for (const f of obj.files) {
-        if (f.category === 'report' && f.content) {
+        if (f.content) {
           const key = f.producer && f.producer !== 'input'
             ? `${obj.name}_${f.producer}_${f.path}`
             : `${obj.name}_${f.path}`;
-          nodeOutputs[key] = f.content;
-          reportFiles.push(f.path);
+          nodeOutputsFull[key] = f.content;
+          // SSE 事件中只保留预览（前 5000 字符），避免事件过大
+          nodeOutputs[key] = f.content.length > 5000
+            ? f.content.slice(0, 5000) + `\n\n...（完整内容共 ${f.content.length} 字符，请通过下载获取）`
+            : f.content;
+          if (f.category === 'report') reportFiles.push(f.path);
         }
       }
     }
-    const meetingSummary = activeObjects.map(o =>
-      `## ${o.name}\n${o.files.filter(f => f.category === 'report').map(f => f.content).join('\n\n')}`
-    ).join('\n\n---\n\n');
+
+    // 将完整内容写入 sessionStorage 路径供后续下载
+    const fullOutputPath = this.checkpointDir
+      ? `${this.checkpointDir}/../pipeline_full_output.json`
+      : '';
+    if (fullOutputPath) {
+      try {
+        fs.writeFileSync(fullOutputPath, JSON.stringify(nodeOutputsFull), 'utf-8');
+      } catch {}
+    }
+    const meetingSummary = allObjs.map(o => {
+      const reports = o.files.filter(f => f.category === 'report' && f.content);
+      const allFiles = o.files.filter(f => f.content);
+      const filesToShow = reports.length > 0 ? reports : allFiles;
+      return `## ${o.name}\n${filesToShow.map(f => {
+        const prefix = f.category === 'report' ? '' : `[${f.category}] `;
+        // 只取前 2000 字符作为摘要，避免 SSE 事件过大
+        const preview = f.content.length > 2000 ? f.content.slice(0, 2000) + '\n\n...（内容过长已截断）' : f.content;
+        return `### ${prefix}${f.path}\n${preview}`;
+      }).join('\n\n')}`;
+    }).join('\n\n---\n\n');
 
     yield {
       type: 'pipeline_complete',
       data: {
-        objects: activeObjects.map(o => ({
+        objects: allObjs.map(o => ({
           id: o.id, name: o.name, status: o.status,
           files: o.files.map(f => ({
             path: f.path, category: f.category, producer: f.producer,
-            ...(f.category === 'report' ? { content: f.content } : {})
+            size: (f.content || '').length
           }))
         })),
         output: {
