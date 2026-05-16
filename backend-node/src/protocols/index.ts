@@ -423,6 +423,7 @@ export interface AppConfig {
     embedding?: string;
     apiKey: string;
     baseUrl: string;
+    headers?: Record<string, string>;
   };
   generation: GenerationParams;
   rag: {
@@ -448,6 +449,7 @@ export interface LLMProviderPreset {
     frequencyPenalty?: boolean;
     presencePenalty?: boolean;
   };
+  headers?: Record<string, string>;
 }
 
 // ============ L1 愿景文档 ============

@@ -79,7 +79,8 @@ function mergeConfig(defaults: AppConfig, overrides: Record<string, unknown>): A
       baseUrl: (llm.baseUrl || llm.base_url || defaults.llm.baseUrl) as string,
       primary: (llm.primary || defaults.llm.primary) as string,
       model: (llm.model || defaults.llm.model) as string,
-      embedding: (llm.embedding || defaults.llm.embedding) as string
+      embedding: (llm.embedding || defaults.llm.embedding) as string,
+      headers: (llm.headers || defaults.llm.headers || undefined) as Record<string, string> | undefined
     };
   }
   if (overrides.generation && typeof overrides.generation === 'object') {

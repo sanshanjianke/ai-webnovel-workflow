@@ -7,6 +7,7 @@ export class OpenAICompatLLM implements LLMProvider {
   private baseUrl: string;
   private model: string;
   private defaults: import('../protocols').GenerationParams;
+  private customHeaders: Record<string, string>;
 
   constructor(apiKey?: string, baseUrl?: string, model?: string) {
     const config = getConfig();
@@ -14,6 +15,22 @@ export class OpenAICompatLLM implements LLMProvider {
     this.baseUrl = baseUrl || config.llm.baseUrl;
     this.model = model || config.llm.model || 'GLM-5';
     this.defaults = config.generation;
+    this.customHeaders = config.llm.headers || {};
+  }
+
+  private buildHeaders(): Record<string, string> {
+    const base: Record<string, string> = {
+      'Content-Type': 'application/json'
+    };
+    // 用户自定义请求头（可覆盖 Authorization）
+    for (const [k, v] of Object.entries(this.customHeaders)) {
+      base[k] = v;
+    }
+    // 如果用户没有自定义 Authorization，使用默认 Bearer
+    if (!base['Authorization'] && !base['authorization']) {
+      base['Authorization'] = `Bearer ${this.apiKey}`;
+    }
+    return base;
   }
 
   // 推断服务商的思维链模式
@@ -52,10 +69,7 @@ export class OpenAICompatLLM implements LLMProvider {
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json'
-      },
+      headers: this.buildHeaders(),
       body: JSON.stringify(body)
     });
 
@@ -100,10 +114,7 @@ export class OpenAICompatLLM implements LLMProvider {
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json'
-      },
+      headers: this.buildHeaders(),
       body: JSON.stringify(body)
     });
 

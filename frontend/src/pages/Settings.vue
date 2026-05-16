@@ -43,6 +43,19 @@
         <input v-model="genConfig.api_key" type="password" placeholder="sk-...">
       </div>
 
+      <!-- 自定义请求头 -->
+      <div class="form-group">
+        <div class="section-toggle" @click="showHeaders = !showHeaders">
+          <label style="cursor:pointer">自定义请求头 <span class="toggle-arrow">{{ showHeaders ? '▾' : '▸' }}</span></label>
+        </div>
+        <div v-if="showHeaders" class="headers-editor">
+          <textarea v-model="headersText" rows="4" :placeholder="headersPlaceholder"></textarea>
+          <div class="param-hint" v-if="headerError" style="color:#e74c3c;margin-top:0.25rem">{{ headerError }}</div>
+          <div class="param-hint" v-else-if="headersText.trim()" style="margin-top:0.25rem">已解析 {{ parsedHeadersCount }} 个请求头</div>
+          <div class="param-hint" v-else style="margin-top:0.25rem">JSON 格式，留空则使用默认 Bearer {apikey}。</div>
+        </div>
+      </div>
+
       <!-- 采样参数 -->
       <div class="form-group">
         <label>Temperature <span class="param-val">{{ genConfig.temperature.toFixed(2) }}</span></label>
@@ -167,6 +180,9 @@ const genConfig = reactive({
   reasoning_effort: 'high'
 })
 
+const showHeaders = ref(false)
+const headersText = ref('')
+
 const uiConfig = reactive({
   enterKeyBehavior: 'newline'
 })
@@ -232,6 +248,50 @@ const samplingWarning = computed(() => {
   return ''
 })
 
+// ── 自定义请求头 ──
+
+const headersPlaceholder = `{
+  "Authorization": "Bearer sk-xxx",
+  "X-Custom-Header": "value"
+}`
+
+const headerError = computed(() => {
+  if (!headersText.value.trim()) return ''
+  try {
+    const obj = JSON.parse(headersText.value)
+    if (typeof obj !== 'object' || Array.isArray(obj)) return '格式错误：需要 JSON 对象，不是数组'
+    return ''
+  } catch (e) {
+    return 'JSON 格式错误：' + e.message
+  }
+})
+
+const parsedHeadersCount = computed(() => {
+  if (!headersText.value.trim() || headerError.value) return 0
+  try {
+    const obj = JSON.parse(headersText.value)
+    return Object.keys(obj).length
+  } catch { return 0 }
+})
+
+function parseHeaders(text) {
+  if (!text.trim()) return {}
+  try {
+    const obj = JSON.parse(text)
+    if (typeof obj !== 'object' || Array.isArray(obj)) return {}
+    const result = {}
+    for (const [k, v] of Object.entries(obj)) {
+      result[k] = typeof v === 'string' ? v : String(v)
+    }
+    return result
+  } catch { return {} }
+}
+
+function serializeHeaders(headers) {
+  if (!headers || Object.keys(headers).length === 0) return ''
+  return JSON.stringify(headers, null, 2)
+}
+
 // ── 数据加载 ──
 
 const fetchProviders = async () => {
@@ -253,6 +313,8 @@ const fetchConfig = async () => {
     genConfig.api_key = ''
     genConfig.base_url = config.value.llm.base_url || ''
     genConfig.model = config.value.llm.model || ''
+    headersText.value = serializeHeaders(config.value.llm.headers)
+    showHeaders.value = !!headersText.value
   }
   if (config.value.generation) {
     genConfig.temperature = config.value.generation.temperature ?? 0.7
@@ -324,7 +386,8 @@ const saveConfig = async () => {
     llm: {
       api_key: genConfig.api_key,
       base_url: genConfig.base_url,
-      model: genConfig.model
+      model: genConfig.model,
+      headers: parseHeaders(headersText.value)
     },
     generation: {
       temperature: genConfig.temperature,
@@ -457,6 +520,32 @@ onMounted(async () => {
   background: #fef9f0;
   border-radius: 4px;
   border-left: 3px solid #e67e22;
+}
+
+/* 自定义请求头 */
+.section-toggle {
+  display: flex;
+  align-items: center;
+  user-select: none;
+}
+
+.section-toggle label {
+  margin: 0;
+}
+
+.toggle-arrow {
+  color: #999;
+  font-size: 0.8rem;
+}
+
+.headers-editor textarea {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.85rem;
+  resize: vertical;
 }
 
 /* 思维链子区域 */
