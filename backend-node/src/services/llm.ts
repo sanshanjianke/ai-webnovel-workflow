@@ -6,30 +6,48 @@ export class OpenAICompatLLM implements LLMProvider {
   private apiKey: string;
   private baseUrl: string;
   private model: string;
+  private defaults: import('../protocols').GenerationParams;
 
   constructor(apiKey?: string, baseUrl?: string, model?: string) {
     const config = getConfig();
     this.apiKey = apiKey || config.llm.apiKey;
     this.baseUrl = baseUrl || config.llm.baseUrl;
     this.model = model || config.llm.model || 'GLM-5';
+    this.defaults = config.generation;
+  }
+
+  // 推断服务商的思维链模式
+  private inferThinkingMode(): 'effort' | 'simple' {
+    const m = this.model.toLowerCase();
+    if (m.includes('deepseek')) return 'effort';
+    return 'simple'; // GLM 等大多数 OpenAI 兼容接口
   }
 
   async invoke(prompt: string, options: LLMOptions = {}): Promise<string> {
     const url = `${this.baseUrl.replace(/\/$/, '')}/chat/completions`;
-    
+    const gen = this.defaults;
+    const thinkMode = this.inferThinkingMode();
+
     const body: Record<string, unknown> = {
       model: options.model || this.model,
       messages: [{ role: 'user', content: prompt }],
-      temperature: options.temperature ?? 0.7,
-      max_tokens: options.maxTokens ?? 16384
+      temperature: options.temperature ?? gen.temperature,
+      max_tokens: options.maxTokens ?? gen.maxTokens,
+      top_p: options.topP ?? gen.topP,
+      frequency_penalty: options.frequencyPenalty ?? gen.frequencyPenalty,
+      presence_penalty: options.presencePenalty ?? gen.presencePenalty
     };
 
-    // 启用 think 模式
+    // 启用思维链
     if (options.thinking) {
-      body.thinking = {
-        type: 'enabled',
-        budget_tokens: options.thinkingBudget || 10000
-      };
+      if (thinkMode === 'effort') {
+        // DeepSeek: thinking 只带 type，reasoning_effort 在顶层
+        body.thinking = { type: 'enabled' };
+        body.reasoning_effort = options.reasoningEffort || gen.reasoningEffort;
+      } else {
+        // GLM 等: thinking 只带 type，无额外参数
+        body.thinking = { type: 'enabled' };
+      }
     }
 
     const response = await fetch(url, {
@@ -54,21 +72,30 @@ export class OpenAICompatLLM implements LLMProvider {
 
   async *stream(prompt: string, options: LLMOptions = {}): AsyncGenerator<LLMChunk> {
     const url = `${this.baseUrl.replace(/\/$/, '')}/chat/completions`;
-    
+    const gen = this.defaults;
+    const thinkMode = this.inferThinkingMode();
+
     const body: Record<string, unknown> = {
       model: options.model || this.model,
       messages: [{ role: 'user', content: prompt }],
-      temperature: options.temperature ?? 0.7,
-      max_tokens: options.maxTokens ?? 16384,
+      temperature: options.temperature ?? gen.temperature,
+      max_tokens: options.maxTokens ?? gen.maxTokens,
+      top_p: options.topP ?? gen.topP,
+      frequency_penalty: options.frequencyPenalty ?? gen.frequencyPenalty,
+      presence_penalty: options.presencePenalty ?? gen.presencePenalty,
       stream: true
     };
 
-    // 启用 think 模式
+    // 启用思维链
     if (options.thinking) {
-      body.thinking = {
-        type: 'enabled',
-        budget_tokens: options.thinkingBudget || 10000
-      };
+      if (thinkMode === 'effort') {
+        // DeepSeek: thinking 只带 type，reasoning_effort 在顶层
+        body.thinking = { type: 'enabled' };
+        body.reasoning_effort = options.reasoningEffort || gen.reasoningEffort;
+      } else {
+        // GLM 等: thinking 只带 type，无额外参数
+        body.thinking = { type: 'enabled' };
+      }
     }
 
     const response = await fetch(url, {

@@ -1,0 +1,82 @@
+[
+  {
+    "id": "openai",
+    "name": "OpenAI",
+    "baseUrl": "https://api.openai.com/v1",
+    "models": ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "o3", "o4-mini"],
+    "thinkingMode": "effort",
+    "supports": { "frequencyPenalty": true, "presencePenalty": true }
+  },
+  {
+    "id": "zhipu",
+    "name": "智谱 (GLM)",
+    "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+    "models": ["GLM-5", "GLM-4-Plus", "GLM-4-Flash"],
+    "thinkingMode": "simple",
+    "supports": { "frequencyPenalty": false, "presencePenalty": false }
+  },
+  {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "baseUrl": "https://api.deepseek.com/v1",
+    "models": ["deepseek-chat", "deepseek-reasoner"],
+    "thinkingMode": "effort",
+    "supports": { "frequencyPenalty": false, "presencePenalty": false }
+  },
+  {
+    "id": "moonshot",
+    "name": "月之暗面 (Kimi)",
+    "baseUrl": "https://api.moonshot.cn/v1",
+    "models": ["kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking", "kimi-k2-turbo", "moonshot-v1-32k", "moonshot-v1-128k"],
+    "thinkingMode": "simple",
+    "supports": { "frequencyPenalty": true, "presencePenalty": true }
+  },
+  {
+    "id": "alibaba",
+    "name": "阿里百炼 (Qwen)",
+    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "models": ["qwen-max", "qwen-plus", "qwen-turbo"],
+    "thinkingMode": "simple",
+    "supports": { "frequencyPenalty": true, "presencePenalty": true }
+  },
+  {
+    "id": "baidu",
+    "name": "百度文心",
+    "baseUrl": "https://qianfan.baidubce.com/v2",
+    "models": ["ernie-4.0-turbo", "ernie-3.5"],
+    "thinkingMode": "none",
+    "supports": { "frequencyPenalty": false, "presencePenalty": false }
+  },
+  {
+    "id": "bytedance",
+    "name": "字节豆包 (Doubao)",
+    "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+    "models": ["doubao-1.5-pro-32k", "doubao-1.5-lite-32k"],
+    "thinkingMode": "simple",
+    "supports": { "frequencyPenalty": true, "presencePenalty": true }
+  },
+  {
+    "id": "jdcloud",
+    "name": "京东云",
+    "baseUrl": "https://modelservice.jdcloud.com/coding/openai/v1",
+    "models": ["GLM-5", "DeepSeek-V3", "DeepSeek-R1"],
+    "thinkingMode": "simple",
+    "supports": { "frequencyPenalty": false, "presencePenalty": false }
+  },
+  {
+    "id": "siliconflow",
+    "name": "硅基流动 (SiliconFlow)",
+    "baseUrl": "https://api.siliconflow.cn/v1",
+    "models": ["Qwen/Qwen3-235B", "DeepSeek-V3-0324", "DeepSeek-R1-0528", "Qwen/QwQ-32B"],
+    "thinkingMode": "effort",
+    "supports": { "frequencyPenalty": true, "presencePenalty": true }
+  },
+  {
+    "id": "custom",
+    "name": "自定义",
+    "baseUrl": "",
+    "models": [],
+    "thinkingMode": "simple",
+    "supports": { "frequencyPenalty": true, "presencePenalty": true }
+  }
+]

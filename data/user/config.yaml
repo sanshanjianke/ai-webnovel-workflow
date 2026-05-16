@@ -9,27 +9,16 @@ rag:
   history: hybrid_retriever
   technique: simple_vector
 
+generation:
+  temperature: 0.7
+  top_p: 1.0
+  frequency_penalty: 0.0
+  presence_penalty: 0.0
+  max_tokens: 16384
+  thinking: true
+  thinking_budget: 10000
+  reasoning_effort: high
+
 worldbook:
   strategy: st_style
   auto_manage: true
-
-pipeline:
-  l1_5:
-    meeting_protocol: editor_reader
-    collaboration_mode: semi_auto
-    max_rounds: 3
-    experts:
-      author: senior_author_v1
-      reader: reader_representative_v1
-  l2:
-    meeting_protocol: plot_driven
-    collaboration_mode: semi_auto
-    max_rounds: 3
-    experts:
-      architect: plot_architect_v1
-      editor: web_editor_v1
-      character: character_designer_v1
-  l3:
-    strategy: mapping_compiler
-  l4:
-    strategy: constrained_renderer

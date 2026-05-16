@@ -39,6 +39,25 @@ export interface LLMOptions {
   model?: string;
   thinking?: boolean;
   thinkingBudget?: number;
+  reasoningEffort?: string;
+  topP?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+}
+
+// simple: GLM — thinking: { type: "enabled" }
+// effort: DeepSeek — thinking: { type: "enabled" } + reasoning_effort at top level
+export type ThinkingMode = 'none' | 'simple' | 'effort';
+
+export interface GenerationParams {
+  temperature: number;
+  topP: number;
+  frequencyPenalty: number;
+  presencePenalty: number;
+  maxTokens: number;
+  thinking: boolean;
+  thinkingBudget: number;
+  reasoningEffort: string;
 }
 
 export interface LLMChunk {
@@ -405,6 +424,7 @@ export interface AppConfig {
     apiKey: string;
     baseUrl: string;
   };
+  generation: GenerationParams;
   rag: {
     history: string;
     technique: string;
@@ -413,17 +433,21 @@ export interface AppConfig {
     strategy: string;
     autoManage: boolean;
   };
-  pipeline: {
-    l15: PipelineStageConfig;
-    l2: PipelineStageConfig;
+  llm_providers?: {
+    custom: LLMProviderPreset[];
   };
 }
 
-export interface PipelineStageConfig {
-  meetingProtocol: string;
-  collaborationMode: string;
-  maxRounds: number;
-  experts?: Record<string, string>;
+export interface LLMProviderPreset {
+  id: string;
+  name: string;
+  baseUrl: string;
+  models: string[];
+  thinkingMode?: ThinkingMode;
+  supports?: {
+    frequencyPenalty?: boolean;
+    presencePenalty?: boolean;
+  };
 }
 
 // ============ L1 愿景文档 ============

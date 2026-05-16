@@ -12,6 +12,16 @@ const DEFAULT_CONFIG: AppConfig = {
     apiKey: '',
     baseUrl: 'https://api.openai.com/v1'
   },
+  generation: {
+    temperature: 0.7,
+    topP: 1.0,
+    frequencyPenalty: 0,
+    presencePenalty: 0,
+    maxTokens: 16384,
+    thinking: false,
+    thinkingBudget: 10000,
+    reasoningEffort: 'high'
+  },
   rag: {
     history: 'hybrid_retriever',
     technique: 'simple_vector'
@@ -19,27 +29,6 @@ const DEFAULT_CONFIG: AppConfig = {
   worldbook: {
     strategy: 'st_style',
     autoManage: true
-  },
-  pipeline: {
-    l15: {
-      meetingProtocol: 'editor_reader',
-      collaborationMode: 'semi_auto',
-      maxRounds: 3,
-      experts: {
-        author: 'senior_author_v1',
-        reader: 'reader_representative_v1'
-      }
-    },
-    l2: {
-      meetingProtocol: 'plot_driven',
-      collaborationMode: 'semi_auto',
-      maxRounds: 3,
-      experts: {
-        architect: 'plot_architect_v1',
-        editor: 'web_editor_v1',
-        character: 'character_designer_v1'
-      }
-    }
   }
 };
 
@@ -93,15 +82,28 @@ function mergeConfig(defaults: AppConfig, overrides: Record<string, unknown>): A
       embedding: (llm.embedding || defaults.llm.embedding) as string
     };
   }
+  if (overrides.generation && typeof overrides.generation === 'object') {
+    const gen = overrides.generation as Record<string, unknown>;
+    result.generation = {
+      temperature: (gen.temperature ?? defaults.generation.temperature) as number,
+      topP: (gen.topP ?? gen.top_p ?? defaults.generation.topP) as number,
+      frequencyPenalty: (gen.frequencyPenalty ?? gen.frequency_penalty ?? defaults.generation.frequencyPenalty) as number,
+      presencePenalty: (gen.presencePenalty ?? gen.presence_penalty ?? defaults.generation.presencePenalty) as number,
+      maxTokens: (gen.maxTokens ?? gen.max_tokens ?? defaults.generation.maxTokens) as number,
+      thinking: (gen.thinking ?? defaults.generation.thinking) as boolean,
+      thinkingBudget: (gen.thinkingBudget ?? gen.thinking_budget ?? defaults.generation.thinkingBudget) as number,
+      reasoningEffort: (gen.reasoningEffort ?? gen.reasoning_effort ?? defaults.generation.reasoningEffort) as string
+    };
+  }
   if (overrides.rag && typeof overrides.rag === 'object') {
     result.rag = { ...defaults.rag, ...(overrides.rag as Record<string, unknown>) } as AppConfig['rag'];
   }
   if (overrides.worldbook && typeof overrides.worldbook === 'object') {
     result.worldbook = { ...defaults.worldbook, ...(overrides.worldbook as Record<string, unknown>) } as AppConfig['worldbook'];
   }
-  if (overrides.pipeline && typeof overrides.pipeline === 'object') {
-    result.pipeline = { ...defaults.pipeline, ...(overrides.pipeline as Record<string, unknown>) } as AppConfig['pipeline'];
+  if (overrides.llm_providers && typeof overrides.llm_providers === 'object') {
+    result.llm_providers = { ...(overrides.llm_providers as Record<string, unknown>) } as AppConfig['llm_providers'];
   }
-  
+
   return result;
 }
