@@ -1,0 +1,62 @@
+[
+  {
+    "id": "openai",
+    "name": "OpenAI",
+    "baseUrl": "https://api.openai.com/v1",
+    "models": ["text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002"]
+  },
+  {
+    "id": "zhipu",
+    "name": "智谱 (GLM)",
+    "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+    "models": ["embedding-3"]
+  },
+  {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "baseUrl": "https://api.deepseek.com/v1",
+    "models": []
+  },
+  {
+    "id": "moonshot",
+    "name": "月之暗面 (Kimi)",
+    "baseUrl": "https://api.moonshot.cn/v1",
+    "models": []
+  },
+  {
+    "id": "alibaba",
+    "name": "阿里百炼 (Qwen)",
+    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "models": ["text-embedding-v3"]
+  },
+  {
+    "id": "baidu",
+    "name": "百度文心",
+    "baseUrl": "https://qianfan.baidubce.com/v2",
+    "models": ["embedding-v1"]
+  },
+  {
+    "id": "bytedance",
+    "name": "字节豆包 (Doubao)",
+    "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+    "models": []
+  },
+  {
+    "id": "jdcloud",
+    "name": "京东云",
+    "baseUrl": "https://modelservice.jdcloud.com/coding/openai/v1",
+    "models": ["text-embedding-v3"]
+  },
+  {
+    "id": "siliconflow",
+    "name": "硅基流动 (SiliconFlow)",
+    "baseUrl": "https://api.siliconflow.cn/v1",
+    "models": ["BAAI/bge-large-zh-v1.5", "BAAI/bge-m3", "netease-youdao/bce-embedding-base_v1"]
+  },
+  {
+    "id": "custom",
+    "name": "自定义",
+    "baseUrl": "",
+    "models": []
+  }
+]

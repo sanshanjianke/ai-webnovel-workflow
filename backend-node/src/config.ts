@@ -8,9 +8,13 @@ const DEFAULT_CONFIG: AppConfig = {
   llm: {
     primary: 'openai_compat',
     model: 'GLM-5',
-    embedding: 'text-embedding-v3',
     apiKey: '',
     baseUrl: 'https://api.openai.com/v1'
+  },
+  embedding: {
+    model: 'text-embedding-v3',
+    apiKey: '',
+    baseUrl: ''
   },
   generation: {
     temperature: 0.7,
@@ -59,11 +63,12 @@ export function loadConfig(configPath?: string): AppConfig {
 export function saveConfig(config: AppConfig, configPath?: string): void {
   const filePath = configPath || path.join(__dirname, '../../data/user/config.yaml');
   const dir = path.dirname(filePath);
-  
+
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  
+
+  _config = config;
   const content = yaml.dump(config, { indent: 2 });
   fs.writeFileSync(filePath, content, 'utf-8');
 }
@@ -79,8 +84,15 @@ function mergeConfig(defaults: AppConfig, overrides: Record<string, unknown>): A
       baseUrl: (llm.baseUrl || llm.base_url || defaults.llm.baseUrl) as string,
       primary: (llm.primary || defaults.llm.primary) as string,
       model: (llm.model || defaults.llm.model) as string,
-      embedding: (llm.embedding || defaults.llm.embedding) as string,
       headers: (llm.headers || defaults.llm.headers || undefined) as Record<string, string> | undefined
+    };
+  }
+  if (overrides.embedding && typeof overrides.embedding === 'object') {
+    const emb = overrides.embedding as Record<string, unknown>;
+    result.embedding = {
+      model: (emb.model || defaults.embedding.model) as string,
+      apiKey: (emb.apiKey || emb.api_key || defaults.embedding.apiKey) as string,
+      baseUrl: (emb.baseUrl || emb.base_url || defaults.embedding.baseUrl) as string,
     };
   }
   if (overrides.generation && typeof overrides.generation === 'object') {
@@ -104,6 +116,9 @@ function mergeConfig(defaults: AppConfig, overrides: Record<string, unknown>): A
   }
   if (overrides.llm_providers && typeof overrides.llm_providers === 'object') {
     result.llm_providers = { ...(overrides.llm_providers as Record<string, unknown>) } as AppConfig['llm_providers'];
+  }
+  if (overrides.embedding_providers && typeof overrides.embedding_providers === 'object') {
+    result.embedding_providers = { ...(overrides.embedding_providers as Record<string, unknown>) } as AppConfig['embedding_providers'];
   }
 
   return result;

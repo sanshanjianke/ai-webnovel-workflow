@@ -1,13 +1,10 @@
 llm:
   primary: open_ai_compat
-  model: MiniMax-M2.5
-  embedding: text-embedding-v3
-  apiKey: pk-a42db54f-334a-4acb-8604-f197f72582a3
-  baseUrl: https://modelservice.jdcloud.com/coding/openai/v1
-  headers: {}
-  api_key: >-
+  model: minimax-m2.5
+  apiKey: >-
     bce-v3/ALTAKSP-HsMf3RKlcQOE9vtxiw5RE/f06ddd0c7e833db46124680721576965547d9aea
-  base_url: https://qianfan.baidubce.com/v2/coding
+  baseUrl: https://qianfan.baidubce.com/v2/coding
+  headers: {}
 generation:
   temperature: 0.7
   topP: 1
@@ -17,16 +14,23 @@ generation:
   thinking: true
   thinkingBudget: 10000
   reasoningEffort: high
-  top_p: 1
-  frequency_penalty: 0
-  presence_penalty: 0
-  max_tokens: 200000
-  thinking_budget: 10000
-  reasoning_effort: high
+embedding:
+  model: text-embedding-v3
+  apiKey: ''
+  baseUrl: ''
 rag:
   history: hybrid_retriever
   technique: simple_vector
 worldbook:
   strategy: st_style
   autoManage: true
-  auto_manage: true
+llm_providers:
+  custom:
+    - id: custom_1779258336690
+      name: test
+      baseUrl: https://qianfan.baidubce.com/v2/coding
+      models:
+        - minimax-m2.5
+      supports:
+        frequencyPenalty: true
+        presencePenalty: true

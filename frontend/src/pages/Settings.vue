@@ -119,7 +119,88 @@
         </div>
       </div>
 
-      <button class="btn btn-primary" @click="saveConfig">保存配置</button>
+      <div class="config-actions">
+        <button class="btn btn-primary" @click="saveLLMConfig">保存 LLM 配置</button>
+        <button class="btn" :class="testBtnClass" :disabled="testing" @click="testConnection">
+          {{ testBtnText }}
+        </button>
+      </div>
+      <div v-if="testResult" class="test-result" :class="testResult.success ? 'test-success' : 'test-error'">
+        <template v-if="testResult.success">
+          <strong>连接成功</strong>
+          <span>模型: {{ testResult.model }}</span>
+          <span>回复: {{ testResult.reply }}</span>
+          <span v-if="testResult.usage">Token: 输入 {{ testResult.usage.prompt_tokens }} / 输出 {{ testResult.usage.completion_tokens }}</span>
+        </template>
+        <template v-else>
+          <strong>连接失败</strong>
+          <span>{{ testResult.error }}</span>
+          <pre v-if="testResult.detail">{{ testResult.detail }}</pre>
+        </template>
+      </div>
+    </div>
+
+    <!-- Embedding 配置 -->
+    <div class="card">
+      <h2>Embedding 配置</h2>
+      <div class="param-hint" style="margin-bottom:0.75rem">用于 RAG 向量检索。留空则自动使用上方 LLM 配置。</div>
+
+      <div class="form-group">
+        <label>服务商</label>
+        <div class="provider-row">
+          <select v-model="selectedEmbedProviderId" @change="onEmbedProviderChange">
+            <optgroup label="内置">
+              <option v-for="p in builtinEmbedProviders" :key="p.id" :value="p.id">{{ p.name }}</option>
+            </optgroup>
+            <optgroup v-if="customEmbedProviders.length" label="自定义">
+              <option v-for="p in customEmbedProviders" :key="p.id" :value="p.id">{{ p.name }}</option>
+            </optgroup>
+          </select>
+          <button class="btn btn-sm" @click="saveEmbedAsCustom">收藏当前</button>
+          <button v-if="isCustomEmbedProvider" class="btn btn-sm btn-danger" @click="deleteEmbedCustom">删除</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Base URL</label>
+        <input v-model="embedConfig.base_url" type="text" :placeholder="'默认: ' + genConfig.base_url">
+      </div>
+
+      <div class="form-group">
+        <label>模型</label>
+        <div class="model-row">
+          <select v-model="embedConfig.model" v-if="embedModelOptions.length">
+            <option v-for="m in embedModelOptions" :key="m" :value="m">{{ m }}</option>
+            <option value="__custom__">其他（手动输入）...</option>
+          </select>
+          <input v-model="embedConfig.model" type="text" placeholder="text-embedding-v3" v-if="!embedModelOptions.length || embedConfig.model === '__custom__' || !embedModelOptions.includes(embedConfig.model)">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>API Key</label>
+        <input v-model="embedConfig.api_key" type="password" placeholder="默认: 使用 LLM API Key">
+      </div>
+
+      <div class="config-actions">
+        <button class="btn btn-primary" @click="saveEmbeddingConfig">保存 Embedding 配置</button>
+        <button class="btn" :class="embedTestBtnClass" :disabled="embedTesting" @click="testEmbedding">
+          {{ embedTestBtnText }}
+        </button>
+      </div>
+      <div v-if="embedTestResult" class="test-result" :class="embedTestResult.success ? 'test-success' : 'test-error'">
+        <template v-if="embedTestResult.success">
+          <strong>连接成功</strong>
+          <span>模型: {{ embedTestResult.model }}</span>
+          <span>向量维度: {{ embedTestResult.dimensions }}</span>
+          <span v-if="embedTestResult.usage">Token: 输入 {{ embedTestResult.usage.prompt_tokens }} / 总计 {{ embedTestResult.usage.total_tokens }}</span>
+        </template>
+        <template v-else>
+          <strong>连接失败</strong>
+          <span>{{ embedTestResult.error }}</span>
+          <pre v-if="embedTestResult.detail">{{ embedTestResult.detail }}</pre>
+        </template>
+      </div>
     </div>
 
     <!-- 界面设置 -->
@@ -182,6 +263,102 @@ const genConfig = reactive({
 
 const showHeaders = ref(false)
 const headersText = ref('')
+const testing = ref(false)
+const testResult = ref(null)
+const embedConfig = reactive({
+  api_key: '',
+  base_url: '',
+  model: 'text-embedding-v3'
+})
+const embedTesting = ref(false)
+const embedTestResult = ref(null)
+
+const embedTestBtnClass = computed(() => {
+  if (embedTesting.value) return 'btn-disabled'
+  return embedTestResult.value ? (embedTestResult.value.success ? 'btn-success' : 'btn-danger') : 'btn-outline'
+})
+
+const embedTestBtnText = computed(() => {
+  if (embedTesting.value) return '测试中...'
+  if (embedTestResult.value) return embedTestResult.value.success ? '连接成功，重新测试' : '连接失败，重新测试'
+  return '测试连接'
+})
+
+/** Embedding 解析：从页面字段组装，空值 fallback 到 LLM 配置 */
+function resolveEmbedPayload() {
+  return {
+    model: embedConfig.model || 'text-embedding-v3',
+    api_key: embedConfig.api_key || genConfig.api_key,
+    base_url: embedConfig.base_url || genConfig.base_url,
+  }
+}
+
+const testEmbedding = async () => {
+  embedTesting.value = true
+  embedTestResult.value = null
+  try {
+    const res = await axios.post('/api/embedding/test', resolveEmbedPayload())
+    embedTestResult.value = res.data
+  } catch (err) {
+    embedTestResult.value = { success: false, error: err.message || '请求失败' }
+  } finally {
+    embedTesting.value = false
+  }
+}
+
+// ── Embedding 服务商 ──
+
+const builtinEmbedProviders = ref([])
+const customEmbedProviders = ref([])
+const selectedEmbedProviderId = ref('custom')
+
+const allEmbedProviders = computed(() => [...builtinEmbedProviders.value, ...customEmbedProviders.value])
+const selectedEmbedProvider = computed(() => allEmbedProviders.value.find(p => p.id === selectedEmbedProviderId.value))
+const isCustomEmbedProvider = computed(() => customEmbedProviders.value.some(p => p.id === selectedEmbedProviderId.value))
+const embedModelOptions = computed(() => selectedEmbedProvider.value?.models || [])
+
+function matchEmbedProvider() {
+  const url = embedConfig.base_url || ''
+  const builtin = builtinEmbedProviders.value.find(p => p.baseUrl === url)
+  if (builtin) { selectedEmbedProviderId.value = builtin.id; return }
+  const custom = customEmbedProviders.value.find(p => p.baseUrl === url)
+  if (custom) { selectedEmbedProviderId.value = custom.id; return }
+  selectedEmbedProviderId.value = 'custom'
+}
+
+const fetchEmbedProviders = async () => {
+  const res = await axios.get('/api/embedding-providers')
+  builtinEmbedProviders.value = res.data.builtin || []
+  customEmbedProviders.value = res.data.custom || []
+}
+
+const onEmbedProviderChange = () => {
+  const p = selectedEmbedProvider.value
+  if (!p || p.id === 'custom') return
+  embedConfig.base_url = p.baseUrl
+  if (p.models.length > 0) embedConfig.model = p.models[0]
+}
+
+const saveEmbedAsCustom = async () => {
+  const name = prompt('为此服务商命名：')
+  if (!name) return
+  const id = 'embed_' + Date.now()
+  const newProvider = {
+    id, name,
+    baseUrl: embedConfig.base_url || genConfig.base_url,
+    models: embedConfig.model ? [embedConfig.model] : [],
+  }
+  customEmbedProviders.value.push(newProvider)
+  await axios.put('/api/embedding-providers', { custom: customEmbedProviders.value.map(p => ({ id: p.id, name: p.name, baseUrl: p.baseUrl, models: p.models })) })
+  selectedEmbedProviderId.value = id
+}
+
+const deleteEmbedCustom = async () => {
+  if (!confirm(`确定删除服务商 "${selectedEmbedProvider.value?.name}"？`)) return
+  customEmbedProviders.value = customEmbedProviders.value.filter(p => p.id !== selectedEmbedProviderId.value)
+  await axios.put('/api/embedding-providers', { custom: customEmbedProviders.value.map(p => ({ id: p.id, name: p.name, baseUrl: p.baseUrl, models: p.models })) })
+  selectedEmbedProviderId.value = 'custom'
+}
 
 const uiConfig = reactive({
   enterKeyBehavior: 'newline'
@@ -313,6 +490,11 @@ const fetchConfig = async () => {
     genConfig.api_key = ''
     genConfig.base_url = config.value.llm.base_url || ''
     genConfig.model = config.value.llm.model || ''
+    if (config.value.embedding) {
+      embedConfig.model = config.value.embedding.model || 'text-embedding-v3'
+      embedConfig.api_key = ''
+      embedConfig.base_url = config.value.embedding.baseUrl || ''
+    }
     headersText.value = serializeHeaders(config.value.llm.headers)
     showHeaders.value = !!headersText.value
   }
@@ -328,6 +510,7 @@ const fetchConfig = async () => {
   }
 
   matchProvider()
+  matchEmbedProvider()
 }
 
 const matchProvider = () => {
@@ -379,16 +562,54 @@ const deleteCustom = async () => {
   selectedProviderId.value = 'custom'
 }
 
+// ── 测试连接 ──
+
+const testBtnClass = computed(() => {
+  if (testing.value) return 'btn-disabled'
+  return testResult.value ? (testResult.value.success ? 'btn-success' : 'btn-danger') : 'btn-outline'
+})
+
+const testBtnText = computed(() => {
+  if (testing.value) return '测试中...'
+  if (testResult.value) return testResult.value.success ? '连接成功，重新测试' : '连接失败，重新测试'
+  return '测试连接'
+})
+
+const testConnection = async () => {
+  testing.value = true
+  testResult.value = null
+  try {
+    const res = await axios.post('/api/llm/test', {
+      llm: {
+        api_key: genConfig.api_key,
+        base_url: genConfig.base_url,
+        model: genConfig.model,
+        headers: parseHeaders(headersText.value),
+      },
+      generation: {
+        thinking: genConfig.thinking,
+      },
+    })
+    testResult.value = res.data
+  } catch (err) {
+    testResult.value = { success: false, error: err.message || '请求失败' }
+  } finally {
+    testing.value = false
+  }
+}
+
 // ── 保存 ──
 
-const saveConfig = async () => {
+const saveLLMConfig = async () => {
+  const llmPayload = {
+    base_url: genConfig.base_url,
+    model: genConfig.model,
+    headers: parseHeaders(headersText.value)
+  }
+  if (genConfig.api_key) llmPayload.api_key = genConfig.api_key
+
   await axios.put('/api/config', {
-    llm: {
-      api_key: genConfig.api_key,
-      base_url: genConfig.base_url,
-      model: genConfig.model,
-      headers: parseHeaders(headersText.value)
-    },
+    llm: llmPayload,
     generation: {
       temperature: genConfig.temperature,
       top_p: genConfig.top_p,
@@ -400,7 +621,18 @@ const saveConfig = async () => {
       reasoning_effort: genConfig.reasoning_effort
     }
   })
-  alert('配置已保存')
+  alert('LLM 配置已保存')
+}
+
+const saveEmbeddingConfig = async () => {
+  const embedPayload = {
+    model: embedConfig.model,
+    base_url: embedConfig.base_url
+  }
+  if (embedConfig.api_key) embedPayload.api_key = embedConfig.api_key
+
+  await axios.put('/api/config', { embedding: embedPayload })
+  alert('Embedding 配置已保存')
 }
 
 // ── UI 配置 ──
@@ -422,8 +654,9 @@ const saveUiConfig = () => {
 
 onMounted(async () => {
   await fetchProviders()
-  fetchModules()
+  await fetchEmbedProviders()
   fetchConfig()
+  fetchModules()
   loadUiConfig()
 })
 </script>
@@ -618,5 +851,63 @@ onMounted(async () => {
 
 .btn-danger:hover {
   background: #c0392b;
+}
+
+.btn-outline {
+  background: transparent;
+  color: #3498db;
+  border: 1px solid #3498db;
+}
+
+.btn-outline:hover {
+  background: #3498db;
+  color: white;
+}
+
+.btn-disabled {
+  background: #ccc;
+  color: white;
+  cursor: not-allowed;
+}
+
+.config-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.test-result {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.test-success {
+  background: #eafaf1;
+  border-left: 3px solid #27ae60;
+  color: #1e7e34;
+}
+
+.test-error {
+  background: #fdf2f2;
+  border-left: 3px solid #e74c3c;
+  color: #c0392b;
+}
+
+.test-result pre {
+  margin: 0.25rem 0 0;
+  padding: 0.5rem;
+  background: rgba(0,0,0,0.05);
+  border-radius: 3px;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 150px;
+  overflow-y: auto;
 }
 </style>

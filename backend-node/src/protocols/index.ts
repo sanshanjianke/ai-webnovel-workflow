@@ -420,10 +420,14 @@ export interface AppConfig {
   llm: {
     primary: string;
     model?: string;
-    embedding?: string;
     apiKey: string;
     baseUrl: string;
     headers?: Record<string, string>;
+  };
+  embedding: {
+    model: string;
+    apiKey: string;
+    baseUrl: string;
   };
   generation: GenerationParams;
   rag: {
@@ -436,6 +440,18 @@ export interface AppConfig {
   };
   llm_providers?: {
     custom: LLMProviderPreset[];
+  };
+  embedding_providers?: {
+    custom: EmbeddingProviderPreset[];
+  };
+}
+
+/** 解析实际使用的 embedding 配置，空值 fallback 到 LLM 配置 */
+export function resolveEmbeddingConfig(config: AppConfig): { model: string; apiKey: string; baseUrl: string } {
+  return {
+    model: config.embedding.model || 'text-embedding-v3',
+    apiKey: config.embedding.apiKey || config.llm.apiKey,
+    baseUrl: config.embedding.baseUrl || config.llm.baseUrl,
   };
 }
 
@@ -450,6 +466,13 @@ export interface LLMProviderPreset {
     presencePenalty?: boolean;
   };
   headers?: Record<string, string>;
+}
+
+export interface EmbeddingProviderPreset {
+  id: string;
+  name: string;
+  baseUrl: string;
+  models: string[];
 }
 
 // ============ L1 愿景文档 ============

@@ -6,10 +6,12 @@
         <div class="nav-title" v-if="$route.path !== '/'">{{ pageTitle }}</div>
         <div class="nav-layers">
           <router-link to="/">仪表盘</router-link>
-          <router-link :to="navLink('/l1')">L1</router-link>
-          <router-link :to="navLink('/orchestrate')">编排</router-link>
-          <router-link :to="navLink('/l3l4')">L3/L4</router-link>
-          <router-link :to="navLink('/output')" class="nav-output">查看输出</router-link>
+          <template v-if="currentProjectId">
+            <router-link :to="navLink('/l1')">L1</router-link>
+            <router-link :to="navLink('/orchestrate')">编排</router-link>
+            <router-link :to="navLink('/l3l4')">L3/L4</router-link>
+            <router-link :to="navLink('/output')" class="nav-output">查看输出</router-link>
+          </template>
           <router-link to="/settings">设置</router-link>
         </div>
       </div>
